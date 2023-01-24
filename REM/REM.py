@@ -519,6 +519,10 @@ def _compute_precision_cholesky(covariances, covariance_type):
     return precisions_chol
 
 
+def _get_mixture_score(X, mixture_scores, scoring_function):
+    mixture_scores.append(scoring_function(X))
+
+
 class REM:
     def __init__(
             self,
@@ -549,6 +553,11 @@ class REM:
         self._density_threshold = None
         self._max_components = None
         self._distance_threshold = None
+        self.weights_iter = None
+        self.covariances_iter = None
+        self.aics_ = []
+        self.bics_ = []
+        self.icls_ = []
 
     def _check_parameters(self, X):
         """Check the Gaussian mixture parameters are well defined."""
@@ -793,6 +802,40 @@ class REM:
 
         self.return_refined(resps)
 
+    def _iterative_REM_procedure(self):
+        while self.n_components_iter > 1:
+            self.prune_exemplar()
+            mixture = GaussianMixture.GaussianMixture(n_components=self.n_components_iter, weights=self.weights_iter,
+                                                      means=self.means_iter, covariances=self.covariances_iter,
+                                                      covariance_type=self.covariance_type).fit(self.X_iter)
+            self.weights_iter = mixture.weights_
+            self.covariances_iter = mixture.covariances_
+            self.mixtures.append(mixture)
+
+    def _get_aic_scores(self, X):
+        for mixture in self.mixtures:
+            _get_mixture_score(X, self.aics_, mixture.aic)
+
+    def _get_bic_scores(self, X):
+        for mixture in self.mixtures:
+            _get_mixture_score(X, self.bics_, mixture.bic)
+
+    def _get_icl_scores(self, X):
+        for mixture in self.mixtures:
+            _get_mixture_score(X, self.icls_, mixture.icl)
+
+    def _get_optimal_mixture(self, X, mixture_scores, get_scores):
+        get_scores(X)
+        return self.mixtures[np.argmax(mixture_scores)]
+
+    def _set_optimal_mixture(self, X):
+        if self.criteria == "aic" or self.criteria == "all":
+            self.aic_mixture = self._get_optimal_mixture(X, self.aics_, self._get_aic_scores)
+        if self.criteria == "bic" or self.criteria == "all":
+            self.bic_mixture = self._get_optimal_mixture(X, self.bics_, self._get_bic_scores)
+        if self.criteria == "icl" or self.criteria == "all":
+            self.icl_mixture = self._get_optimal_mixture(X, self.icls_, self._get_icl_scores)
+
     def plot_exemplars(self, X):
         self._density, self._distance = _estimate_density_distances(X, self.bandwidth)
         _create_decision_plots(self._density, self._distance)
@@ -809,59 +852,5 @@ class REM:
 
     def fit_predict(self, X, y=None):
         self._initialize_parameters(X)
-
-        while self.n_components_iter > 1:
-            self.prune_exemplar()
-
-            mixture = GaussianMixture.GaussianMixture(n_components=self.n_components_iter, weights=self.weights_iter,
-                                                      means=self.means_iter, covariances=self.covariances_iter,
-                                                      covariance_type=self.covariance_type).fit(self.X_iter)
-
-            self.weights_iter = mixture.weights_
-
-            self.covariances_iter = mixture.covariances_
-
-            self.mixtures.append(mixture)
-
-        if self.criteria == "aic":
-            self.aics_ = []
-
-            for mixture in self.mixtures:
-                self.aics_.append(mixture.aic(X))
-
-            self.aic_mixture = self.mixtures[np.argmax(self.aics_)]
-
-        elif self.criteria == "bic":
-            self.bics_ = []
-            for mixture in self.mixtures:
-                self.bics_.append(mixture.bic(X))
-
-            self.bic_mixture = self.mixtures[np.argmax(self.bics_)]
-
-        elif self.criteria == "icl":
-            self.icls_ = []
-            for mixture in self.mixtures:
-                self.icls_.append(mixture.icl(X))
-
-            self.icl_mixture = self.mixtures[np.argmax(self.icls_)]
-
-        elif self.criteria == "all":
-            self.aics_ = []
-
-            for mixture in self.mixtures:
-                self.aics_.append(mixture.aic(X))
-
-            self.aic_mixture = self.mixtures[np.argmin(self.aics_)]
-
-            self.bics_ = []
-            for mixture in self.mixtures:
-                self.bics_.append(mixture.bic(X))
-
-            self.bic_mixture = self.mixtures[np.argmin(self.bics_)]
-
-            self.icls_ = []
-            for mixture in self.mixtures:
-                self.icls_.append(mixture.icl(X))
-
-            self.icl_mixture = self.mixtures[np.argmin(self.icls_)]
-
+        self._iterative_REM_procedure()
+        self._set_optimal_mixture(X)
