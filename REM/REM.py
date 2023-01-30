@@ -5,6 +5,7 @@
 import time
 import numpy as np
 from scipy import linalg
+from queue import PriorityQueue
 from sklearn.metrics.pairwise import euclidean_distances
 import scipy.spatial.distance as distance
 from sklearn.neighbors import KernelDensity, KDTree
@@ -548,6 +549,7 @@ class REM:
         self.random_state = random_state
         self.verbose = verbose
         self.verbose_interval = verbose_interval
+        self.n_mixtures = 0
         self._distance = None
         self._density = None
         self._density_threshold = None
@@ -555,9 +557,10 @@ class REM:
         self._distance_threshold = None
         self.weights_iter = None
         self.covariances_iter = None
-        self.aics_ = []
-        self.bics_ = []
-        self.icls_ = []
+        self.mixtures = []
+        self.aics_ = PriorityQueue()
+        self.bics_ = PriorityQueue()
+        self.icls_ = PriorityQueue()
 
     def _check_parameters(self, X):
         """Check the Gaussian mixture parameters are well defined."""
@@ -607,6 +610,22 @@ class REM:
             self._density, self._distance = _estimate_density_distances(X, self.bandwidth)
         return self._select_exemplars(X)
 
+    def _add_mixture_to_pq(self, new_mixture, X):
+        if self.criteria == 'aic' or self.criteria == 'all':
+            self.aics_.put((-new_mixture.aic(X), self.n_mixtures))
+        if self.criteria == 'bic' or self.criteria == 'all':
+            self.bics_.put((-new_mixture.bic(X), self.n_mixtures))
+        if self.criteria == 'icl' or self.criteria == 'all':
+            self.icls_.put((-new_mixture.icl(X), self.n_mixtures))
+
+    def _add_mixture(self, X):
+        new_mixture = GaussianMixture.GaussianMixture(n_components=self.n_components_iter, weights=self.weights_iter,
+                                                         means=self.means_iter, covariances=self.covariances_iter,
+                                                         covariance_type=self.covariance_type).fit(self.X_iter)
+        self._add_mixture_to_pq(new_mixture, X)
+        self.mixtures.append(new_mixture)
+        self.n_mixtures += 1
+
     def _initialize_parameters(self, X):
         """Initialization of the Gaussian mixture exemplars from a decision plot.
         
@@ -619,12 +638,9 @@ class REM:
         self.n_components_iter = self.means_iter.shape[0]
         self.covariances_iter = _initialize_covariances(X, self.means_iter, self.covariance_type)
         self.weights_iter = np.ones((self.n_components_iter)) / self.n_components_iter
-        self.mixtures = [GaussianMixture.GaussianMixture(n_components=self.n_components_iter, weights=self.weights_iter,
-                                                         means=self.means_iter, covariances=self.covariances_iter,
-                                                         covariance_type=self.covariance_type).fit(self.X_iter)]
-        self.n_mixtures = 1
+        self._add_mixture(X)
 
-    def compute_overlap(self, n_features):
+    def compute_overlap(self, n_features, cov):
         # 
         # n_components = self.n_components_iter
         # weights = self.weights_iter
@@ -667,9 +683,9 @@ class REM:
         # overlap.runExactOverlap(n_features_ptr, n_components_ptr, weights_ptr, means1_ptr, covariances1_ptr, pars_ptr, lim_ptr, OmegaMap1_ptr, BarOmega_ptr, MaxOmega_ptr, rcMax_ptr)
         # 
 
-        covariances_jitter = np.zeros(self.covariances_iter.shape)
+        covariances_jitter = np.zeros(cov.shape)
         for i in range(self.n_components_iter):
-            val, vec = np.linalg.eig(self.covariances_iter[i])
+            val, vec = np.linalg.eig(cov[i])
             val += np.abs(np.random.normal(loc=0, scale=0.01, size=n_features))
             covariances_jitter[i, :, :] = vec.dot(np.diag(val)).dot(np.linalg.inv(vec))
 
@@ -776,16 +792,23 @@ class REM:
         resp = np.ones((n_samples, self.n_components_iter)) / self.n_components_iter
 
         self.covariances_iter += np.ones(self.covariances_iter.shape) * 1e-6
+        print(self.covariances_iter.shape)
+        if self.covariance_type == 'spherical':
+            expanded_covariance_iter = np.array([np.full((n_features, n_features), i) for i in self.covariances_iter])
+        elif self.covariance_type == 'diag':
+            expanded_covariance_iter = np.array([np.full((n_features, ), j) for i in self.covariances_iter for j in i]).reshape(self.n_components_iter, n_features, n_features)
+        else:
+            expanded_covariance_iter = self.covariances_iter
+        print(expanded_covariance_iter.shape)
 
         for j in range(self.n_components_iter):
             distances[:, j, np.newaxis] = distance.cdist(self.X_iter, self.means_iter[j, :][np.newaxis],
-                                                         metric='mahalanobis',
-                                                         VI=np.linalg.inv(self.covariances_iter[j, :, :]))
+                                                         metric='mahalanobis')
 
         covariances_logdet_penalty = np.array(
-            [np.log(np.linalg.det(self.covariances_iter[i])) for i in range(self.n_components_iter)]) / n_samples
+            [np.log(np.linalg.det(expanded_covariance_iter[i])) for i in range(self.n_components_iter)]) / n_samples
 
-        overlap_max = self.compute_overlap(n_features)
+        overlap_max = self.compute_overlap(n_features, expanded_covariance_iter)
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -802,39 +825,23 @@ class REM:
 
         self.return_refined(resps)
 
-    def _iterative_REM_procedure(self):
+    def update_mixture(self, X):
+        self._add_mixture(X)
+        self.weights_iter = self.mixtures[-1].weights_
+        self.covariances_iter = self.mixtures[-1].covariances_
+
+    def _iterative_REM_procedure(self, X):
         while self.n_components_iter > 1:
             self.prune_exemplar()
-            mixture = GaussianMixture.GaussianMixture(n_components=self.n_components_iter, weights=self.weights_iter,
-                                                      means=self.means_iter, covariances=self.covariances_iter,
-                                                      covariance_type=self.covariance_type).fit(self.X_iter)
-            self.weights_iter = mixture.weights_
-            self.covariances_iter = mixture.covariances_
-            self.mixtures.append(mixture)
-
-    def _get_aic_scores(self, X):
-        for mixture in self.mixtures:
-            _get_mixture_score(X, self.aics_, mixture.aic)
-
-    def _get_bic_scores(self, X):
-        for mixture in self.mixtures:
-            _get_mixture_score(X, self.bics_, mixture.bic)
-
-    def _get_icl_scores(self, X):
-        for mixture in self.mixtures:
-            _get_mixture_score(X, self.icls_, mixture.icl)
-
-    def _get_optimal_mixture(self, X, mixture_scores, get_scores):
-        get_scores(X)
-        return self.mixtures[np.argmax(mixture_scores)]
+            self.update_mixture(X)
 
     def _set_optimal_mixture(self, X):
         if self.criteria == "aic" or self.criteria == "all":
-            self.aic_mixture = self._get_optimal_mixture(X, self.aics_, self._get_aic_scores)
+            self.aic_mixture = self.mixtures[self.aics_.get()[1]]
         if self.criteria == "bic" or self.criteria == "all":
-            self.bic_mixture = self._get_optimal_mixture(X, self.bics_, self._get_bic_scores)
+            self.bic_mixture = self.mixtures[self.bics_.get()[1]]
         if self.criteria == "icl" or self.criteria == "all":
-            self.icl_mixture = self._get_optimal_mixture(X, self.icls_, self._get_icl_scores)
+            self.icl_mixture = self.mixtures[self.icls_.get()[1]]
 
     def plot_exemplars(self, X):
         self._density, self._distance = _estimate_density_distances(X, self.bandwidth)
@@ -852,5 +859,5 @@ class REM:
 
     def fit_predict(self, X, y=None):
         self._initialize_parameters(X)
-        self._iterative_REM_procedure()
+        self._iterative_REM_procedure(X)
         self._set_optimal_mixture(X)
