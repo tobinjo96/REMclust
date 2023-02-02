@@ -184,7 +184,6 @@ def _initialize_covariances(X, means, covariance_type):
         covariances = np.diag(np.ones(n_features) * variance)
     elif covariance_type == "diag":
         covariances = np.ones((n_components, n_features)) * variance
-
     return covariances
 
 
@@ -777,7 +776,8 @@ class REM:
 
         self.means_iter = self.means_iter[self.weights_iter != 0, :]
 
-        self.covariances_iter = self.covariances_iter[self.weights_iter != 0, :, :]
+        if self.covariance_type != 'tied':
+            self.covariances_iter = self.covariances_iter[self.weights_iter != 0]
 
         self.weights_iter = self.weights_iter[self.weights_iter != 0]
 
@@ -792,18 +792,15 @@ class REM:
         resp = np.ones((n_samples, self.n_components_iter)) / self.n_components_iter
 
         self.covariances_iter += np.ones(self.covariances_iter.shape) * 1e-6
-        print(self.covariances_iter.shape)
         if self.covariance_type == 'spherical':
-            expanded_covariance_iter = np.array([np.full((n_features, n_features), i) for i in self.covariances_iter])
+            expanded_covariance_iter = np.array([np.diag(np.ones(n_features) * i) for i in self.covariances_iter])
         elif self.covariance_type == 'diag':
-            expanded_covariance_iter = np.array([np.full((n_features, ), j) for i in self.covariances_iter for j in i]).reshape(self.n_components_iter, n_features, n_features)
+            expanded_covariance_iter = np.array([np.diag(i) for i in self.covariances_iter])
         else:
             expanded_covariance_iter = self.covariances_iter
-        print(expanded_covariance_iter.shape)
-
         for j in range(self.n_components_iter):
             distances[:, j, np.newaxis] = distance.cdist(self.X_iter, self.means_iter[j, :][np.newaxis],
-                                                         metric='mahalanobis')
+                                                         metric='mahalanobis', VI=expanded_covariance_iter[j, :, :])
 
         covariances_logdet_penalty = np.array(
             [np.log(np.linalg.det(expanded_covariance_iter[i])) for i in range(self.n_components_iter)]) / n_samples
