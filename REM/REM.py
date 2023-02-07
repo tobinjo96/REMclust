@@ -523,10 +523,59 @@ def _get_mixture_score(X, mixture_scores, scoring_function):
     mixture_scores.append(scoring_function(X))
 
 
+def _print_mixing_proportions(weights):
+    print("Mixing proportions:")
+    format_row = "{:>22}" * (len(weights))
+    print(format_row.format(*[i for i in range(len(weights))]))
+    print(format_row.format(*weights) + "\n")
+
+
+def _print_means(means):
+    print("Means:")
+    format_row = "{:>6}" * (len(means[0]) + 1)
+    labels = [""] + ["[,{}]".format(i) for i in range(len(means[0]))]
+    print(format_row.format(*labels))
+    for i, j in enumerate(means):
+        label = "[{},]".format(i)
+        print(format_row.format(label, *j))
+    print()
+
+
+def _print_covariances(covariances, covariance_type, n_features):
+    expanded_covariances = _expand_covariance_matrix(covariances, covariance_type, n_features)
+    print("Variances:")
+    format_row = "{:>20}" * (len(expanded_covariances[0][0]) + 1)
+    for i, j in enumerate(expanded_covariances):
+        label = "[{},,]".format(i)
+        print(label)
+        labels = [""] + ["[,{}]".format(i) for i in range(len(j[0]))]
+        print(format_row.format(*labels))
+        for k, l in enumerate(j):
+            label = "[{},]".format(k)
+            print(format_row.format(label, *l))
+    print()
+
+
+def _print_parameter_info(mixture):
+    _print_mixing_proportions(mixture.weights_)
+    _print_means(mixture.means_)
+    _, n_features = mixture.means_.shape
+    _print_covariances(mixture.covariances_, mixture.covariance_type, n_features)
+
+
+def _expand_covariance_matrix(covariances, covariance_type, n_features):
+    if covariance_type == 'spherical':
+        return np.array([np.diag(np.ones(n_features) * i) for i in covariances])
+    elif covariance_type == 'diag':
+        return np.array([np.diag(i) for i in covariances])
+    else:
+        return covariances
+
 class REM:
     def __init__(
             self,
             *,
+            data,
             covariance_type="full",
             criteria="none",
             bandwidth="diagonal",
@@ -537,6 +586,8 @@ class REM:
             verbose=0,
             verbose_interval=10,
     ):
+        self.data = data
+        self.fitted = False
         self.t1 = None
         self.t2 = None
         self.covariance_type = covariance_type
@@ -561,9 +612,9 @@ class REM:
         self.bics_ = PriorityQueue()
         self.icls_ = PriorityQueue()
 
-    def _check_parameters(self, X):
+    def _check_parameters(self):
         """Check the Gaussian mixture parameters are well defined."""
-        _, n_features = X.shape
+        _, n_features = self.data.shape
         if self.covariance_type not in ["spherical", "tied", "diag", "full"]:
             raise ValueError(
                 "Invalid value for 'covariance_type': %s "
@@ -596,48 +647,48 @@ class REM:
             message_start = 'Density threshold provided, but no distance threshold provided.'
         warnings.warn(message_start + ' Clustering will continue with the max number of components set to ' + str(self._max_components))
 
-    def _select_exemplars(self, X):
+    def _select_exemplars(self):
         if self._density_threshold is not None and self._distance_threshold is not None:
-            return _select_exemplars_from_thresholds(X, self._density, self._distance, self._density_threshold, self._distance_threshold)
+            return _select_exemplars_from_thresholds(self.data, self._density, self._distance, self._density_threshold, self._distance_threshold)
         else:
             if self._density_threshold is not None or self._distance_threshold is not None:
                 self._print_threshold_parameter_warning()
-            return _select_exemplars_fromK(X, self._density, self._distance, self._max_components)
+            return _select_exemplars_fromK(self.data, self._density, self._distance, self._max_components)
 
-    def _get_exemplars(self, X):
+    def _get_exemplars(self):
         if self._density is None and self._distance is None:
-            self._density, self._distance = _estimate_density_distances(X, self.bandwidth)
-        return self._select_exemplars(X)
+            self._density, self._distance = _estimate_density_distances(self.data, self.bandwidth)
+        return self._select_exemplars()
 
-    def _add_mixture_to_pq(self, new_mixture, X):
+    def _add_mixture_to_pq(self, new_mixture):
         if self.criteria == 'aic' or self.criteria == 'all':
-            self.aics_.put((-new_mixture.aic(X), self.n_mixtures))
+            self.aics_.put((new_mixture.aic(self.data), self.n_mixtures))
         if self.criteria == 'bic' or self.criteria == 'all':
-            self.bics_.put((-new_mixture.bic(X), self.n_mixtures))
+            self.bics_.put((new_mixture.bic(self.data), self.n_mixtures))
         if self.criteria == 'icl' or self.criteria == 'all':
-            self.icls_.put((-new_mixture.icl(X), self.n_mixtures))
+            self.icls_.put((new_mixture.icl(self.data), self.n_mixtures))
 
-    def _add_mixture(self, X):
+    def _add_mixture(self):
         new_mixture = GaussianMixture.GaussianMixture(n_components=self.n_components_iter, weights=self.weights_iter,
                                                          means=self.means_iter, covariances=self.covariances_iter,
                                                          covariance_type=self.covariance_type).fit(self.X_iter)
-        self._add_mixture_to_pq(new_mixture, X)
+        self._add_mixture_to_pq(new_mixture)
         self.mixtures.append(new_mixture)
         self.n_mixtures += 1
 
-    def _initialize_parameters(self, X):
+    def _initialize_parameters(self):
         """Initialization of the Gaussian mixture exemplars from a decision plot.
         
         Parameters
         ----------
-        X : array-like of shape (n_samples, n_features)
+        self.data : array-like of shape (n_samples, n_features)
         
         """
-        self.X_iter, self.means_iter = self._get_exemplars(X)
+        self.X_iter, self.means_iter = self._get_exemplars()
         self.n_components_iter = self.means_iter.shape[0]
-        self.covariances_iter = _initialize_covariances(X, self.means_iter, self.covariance_type)
+        self.covariances_iter = _initialize_covariances(self.data, self.means_iter, self.covariance_type)
         self.weights_iter = np.ones((self.n_components_iter)) / self.n_components_iter
-        self._add_mixture(X)
+        self._add_mixture()
 
     def compute_overlap(self, n_features, cov):
         # 
@@ -792,12 +843,7 @@ class REM:
         resp = np.ones((n_samples, self.n_components_iter)) / self.n_components_iter
 
         self.covariances_iter += np.ones(self.covariances_iter.shape) * 1e-6
-        if self.covariance_type == 'spherical':
-            expanded_covariance_iter = np.array([np.diag(np.ones(n_features) * i) for i in self.covariances_iter])
-        elif self.covariance_type == 'diag':
-            expanded_covariance_iter = np.array([np.diag(i) for i in self.covariances_iter])
-        else:
-            expanded_covariance_iter = self.covariances_iter
+        expanded_covariance_iter = _expand_covariance_matrix(self.covariances_iter, self.covariance_type, n_features)
         for j in range(self.n_components_iter):
             distances[:, j, np.newaxis] = distance.cdist(self.X_iter, self.means_iter[j, :][np.newaxis],
                                                          metric='mahalanobis', VI=expanded_covariance_iter[j, :, :])
@@ -822,39 +868,87 @@ class REM:
 
         self.return_refined(resps)
 
-    def update_mixture(self, X):
-        self._add_mixture(X)
+    def update_mixture(self):
+        self._add_mixture()
         self.weights_iter = self.mixtures[-1].weights_
         self.covariances_iter = self.mixtures[-1].covariances_
 
-    def _iterative_REM_procedure(self, X):
+    def _iterative_REM_procedure(self):
         while self.n_components_iter > 1:
             self.prune_exemplar()
-            self.update_mixture(X)
+            self.update_mixture()
 
-    def _set_optimal_mixture(self, X):
+    def _set_optimal_mixture(self):
         if self.criteria == "aic" or self.criteria == "all":
-            self.aic_mixture = self.mixtures[self.aics_.get()[1]]
+            self.aic_mixture = self.mixtures[self.aics_.queue[0][1]]
         if self.criteria == "bic" or self.criteria == "all":
-            self.bic_mixture = self.mixtures[self.bics_.get()[1]]
+            self.bic_mixture = self.mixtures[self.bics_.queue[0][1]]
         if self.criteria == "icl" or self.criteria == "all":
-            self.icl_mixture = self.mixtures[self.icls_.get()[1]]
+            self.icl_mixture = self.mixtures[self.icls_.queue[0][1]]
 
-    def plot_exemplars(self, X):
-        self._density, self._distance = _estimate_density_distances(X, self.bandwidth)
+    def plot_exemplars(self):
+        self._density, self._distance = _estimate_density_distances(self.data, self.bandwidth)
         _create_decision_plots(self._density, self._distance)
 
-    def fit(self, X, y=None, max_components=10, density_threshold=None, distance_threshold=None):
+    def _print_score_table(self, rating_type, queue):
+        print(str.upper(rating_type) + " scores:")
+        print("{:<25} {:<15}".format("Number of components", str.upper(rating_type)))
+        for i in queue.queue:
+            mixture = self.mixtures[i[1]]
+            n_components = mixture.n_components
+            print("{:<25} {:<15}".format(n_components, i[0]))
+        print()
+
+    def _print_classification(self, mixture):
+        print("Clustering Table:")
+        ys = mixture.predict(self.data)
+        unique_ys = np.unique(ys)
+        unique_ys.sort()
+        format_row = "{:>4}" * (len(unique_ys))
+        print(format_row.format(*unique_ys))
+        cluster_count = np.array([np.sum(ys == i) for i in unique_ys])
+        print(format_row.format(*cluster_count))
+        print()
+
+    def _print_top_mixture_info(self, mixture, score_type, queue):
+        print("REM " + self.covariance_type + " model with " + str(mixture.n_components) + " components.")
+        print()
+        print("{:<25} {:<5} {:<15}".format("Log-Likelihood", "n", str.upper(score_type)))
+        print("{:<25} {:<5} {:<15}".format(mixture.score(self.data), np.shape(self.data)[0], queue.queue[0][0]))
+        print()
+
+    def print_summary(self, score_type, queue, mixture, parameters, classification, scores):
+        if scores:
+            self._print_score_table(score_type, queue)
+        self._print_top_mixture_info(mixture, score_type, queue)
+        if classification:
+            self._print_classification(mixture)
+        if parameters:
+            _print_parameter_info(mixture)
+
+    def summary(self, parameters=False, classification=False, scores=False):
+        if self.criteria == "aic" or self.criteria == "all":
+            self.print_summary("aic", self.aics_, self.aic_mixture, parameters=parameters,
+                               classification=classification, scores=scores)
+        if self.criteria == "bic" or self.criteria == "all":
+            self.print_summary("bic", self.bics_, self.bic_mixture, parameters=parameters,
+                               classification=classification, scores=scores)
+        if self.criteria == "icl" or self.criteria == "all":
+            self.print_summary("icl", self.icls_, self.icl_mixture, parameters=parameters,
+                               classification=classification, scores=scores)
+
+    def fit(self, y=None, max_components=10, density_threshold=None, distance_threshold=None):
         self.t1 = time.perf_counter()
         self._max_components = max_components
         self._density_threshold = density_threshold
         self._distance_threshold = distance_threshold
-        self.fit_predict(X, y)
+        self.fit_predict()
+        self.fitted = True
         self.t2 = time.perf_counter()
 
         return self
 
-    def fit_predict(self, X, y=None):
-        self._initialize_parameters(X)
-        self._iterative_REM_procedure(X)
-        self._set_optimal_mixture(X)
+    def fit_predict(self):
+        self._initialize_parameters()
+        self._iterative_REM_procedure()
+        self._set_optimal_mixture()
