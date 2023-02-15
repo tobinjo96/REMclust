@@ -142,6 +142,17 @@ def _create_decision_plots(density, distance):
     plt.show()
 
 
+def _plot_criterion_score(queue, mixtures, line_style, label):
+    criterion_scores = queue.queue
+    criterion_scores.sort(key=lambda x: x[1], reverse=True)
+    x_values = []
+    y_values = []
+    for i in criterion_scores:
+        y_values.append(i[0])
+        x_values.append(mixtures[i[1]].n_components)
+    plt.plot(x_values, y_values, line_style, label=label)
+
+
 def _select_exemplars_from_thresholds(X, density, distance, density_threshold, distance_threshold):
     density_inlier = density > density_threshold
     distance_inlier = distance > distance_threshold
@@ -571,6 +582,7 @@ def _expand_covariance_matrix(covariances, covariance_type, n_features):
     else:
         return covariances
 
+
 class REM:
     def __init__(
             self,
@@ -936,6 +948,28 @@ class REM:
         if self.criteria == "icl" or self.criteria == "all":
             self.print_summary("icl", self.icls_, self.icl_mixture, parameters=parameters,
                                classification=classification, scores=scores)
+
+
+    def _plot(self, plotting_function):
+        if self.criteria == "aic" or self.criteria == "all":
+            plotting_function(self.aic_mixture, self.aics_)
+        if self.criteria == "bic" or self.criteria == "all":
+            plotting_function(self.bic_mixture, self.bics_)
+        if self.criteria == "icl" or self.criteria == "all":
+            plotting_function(self.icl_mixture, self.icls_)
+
+    def criterion_plot(self):
+        plt.figure(figsize=(15, 6))
+        if self.criteria == "aic" or self.criteria == "all":
+            _plot_criterion_score(self.aics_, self.mixtures, "-ro", "AIC")
+        if self.criteria == "bic" or self.criteria == "all":
+            _plot_criterion_score(self.bics_, self.mixtures, "-bo", "BIC")
+        if self.criteria == "icl" or self.criteria == "all":
+            _plot_criterion_score(self.icls_, self.mixtures, "-go", "ICL")
+        plt.xlabel("Number of Components")
+        plt.ylabel("Criterion Score")
+        plt.legend()
+        plt.show()
 
     def fit(self, y=None, max_components=10, density_threshold=None, distance_threshold=None):
         self.t1 = time.perf_counter()
