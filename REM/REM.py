@@ -1,11 +1,15 @@
 """Gaussian Mixture Model."""
 
 # Modified code from Scikit-Learn
-
+import math
 import time
 import numpy as np
+from matplotlib import transforms
+from numpy.linalg import eig
 from scipy import linalg
 from queue import PriorityQueue
+import pandas as pd
+from matplotlib.patches import Ellipse
 from sklearn.metrics.pairwise import euclidean_distances
 import scipy.spatial.distance as distance
 from sklearn.neighbors import KernelDensity, KDTree
@@ -13,8 +17,6 @@ import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import warnings
 
-import importlib.util
-import sys
 from . import GaussianMixture
 
 import rpy2.robjects as robjects
@@ -949,14 +951,51 @@ class REM:
             self.print_summary("icl", self.icls_, self.icl_mixture, parameters=parameters,
                                classification=classification, scores=scores)
 
+    def _get_selected_mixture(self, mixture_selection):
+        if self.criteria == "aic" or (self.criteria == "all" and str.lower(mixture_selection) == "aic"):
+            return self.aic_mixture
+        elif self.criteria == "bic" or (self.criteria == "all" and str.lower(mixture_selection) == "bic"):
+            return self.bic_mixture
+        elif self.criteria == "icl" or (self.criteria == "all" and str.lower(mixture_selection) == "icl"):
+            return self.icl_mixture
+        elif self.criteria == "all" and mixture_selection == "":
+            raise Exception("No model selected to plot")
+        else:
+            raise Exception("Cannot plot " + mixture_selection + " selected mixture as the selection criteria was set "
+                                                                 + "to " + self.criteria)
 
-    def _plot(self, plotting_function):
-        if self.criteria == "aic" or self.criteria == "all":
-            plotting_function(self.aic_mixture, self.aics_)
-        if self.criteria == "bic" or self.criteria == "all":
-            plotting_function(self.bic_mixture, self.bics_)
-        if self.criteria == "icl" or self.criteria == "all":
-            plotting_function(self.icl_mixture, self.icls_)
+    def _draw_ellipse(self, covariances, means, ax):
+        pearson = covariances[0, 1] / np.sqrt(covariances[0, 0] * covariances[1, 1])
+        ell_radius_x = np.sqrt(1 + pearson)
+        ell_radius_y = np.sqrt(1 - pearson)
+        ellipse = Ellipse((0, 0), width=ell_radius_x * 2, height=ell_radius_y * 2, facecolor='none', edgecolor='grey')
+        scale_x = np.sqrt(covariances[0, 0]) * 2
+        scale_y = np.sqrt(covariances[1, 1]) * 2
+        transf = transforms.Affine2D() \
+            .rotate_deg(45) \
+            .scale(scale_x, scale_y) \
+            .translate(means[0], means[1])
+        ellipse.set_transform(transf + ax.transData)
+        ax.add_patch(ellipse)
+
+    def classification_plot(self, mixture_selection=''):
+        _, n_features = self.X_iter.shape
+        mixture = self._get_selected_mixture(mixture_selection)
+        labels = mixture.predict(self.data)
+        dimensions = self.data.shape[1]
+        fig, axs = plt.subplots(dimensions, dimensions, figsize=(15, 8))
+        expanded_covariances = _expand_covariance_matrix(mixture.covariances_, self.covariance_type, n_features)
+        for i in range(dimensions):
+            for j in range(dimensions):
+                if i != j:
+                    subplot_data = pd.DataFrame({"x": self.data[:, i], "y": self.data[:, j], "labels": labels})
+                    groups = subplot_data.groupby("labels")
+                    for _, group in groups:
+                        axs[j, i].plot(group.x, group.y, marker="o", linestyle="", markersize=1.5)
+                    for k in range(mixture.n_components):
+                        self._draw_ellipse(expanded_covariances[k], [mixture.means_[k][i], mixture.means_[k][j]], axs[j, i])
+                        axs[j, i].scatter(mixture.means_[k][i], mixture.means_[k][j], c="black", s=10)
+        plt.show()
 
     def criterion_plot(self):
         plt.figure(figsize=(15, 6))
