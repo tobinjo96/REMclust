@@ -34,7 +34,7 @@ def _check_weights(weights, n_components):
     """
     weights = check_array(weights, dtype=[np.float64, np.float32], ensure_2d=False)
     _check_shape(weights, (n_components,), "weights")
-    
+
     # check range
     if any(np.less(weights, 0.0)) or any(np.greater(weights, 1.0)):
         raise ValueError(
@@ -42,7 +42,7 @@ def _check_weights(weights, n_components):
             "[0, 1], but got max value %.5f, min value %.5f"
             % (np.min(weights), np.max(weights))
         )
-        
+
     # check normalization
     if not np.allclose(np.abs(1.0 - np.sum(weights)), 0.0):
         raise ValueError(
@@ -126,7 +126,7 @@ def _check_precisions(precisions, covariance_type, n_components, n_features):
         ensure_2d=False,
         allow_nd=covariance_type == "full",
     )
-    
+
     precisions_shape = {
         "full": (n_components, n_features, n_features),
         "tied": (n_features, n_features),
@@ -136,7 +136,7 @@ def _check_precisions(precisions, covariance_type, n_components, n_features):
     _check_shape(
         precisions, precisions_shape[covariance_type], "%s precision" % covariance_type
     )
-    
+
     _check_precisions = {
         "full": _check_precisions_full,
         "tied": _check_precision_matrix,
@@ -321,7 +321,7 @@ def _compute_precision_cholesky(covariances, covariance_type):
         "or collapsed samples). Try to decrease the number of components, "
         "or increase reg_covar."
     )
-    
+
     if covariance_type == "full":
         n_components, n_features, _ = covariances.shape
         precisions_chol = np.empty((n_components, n_features, n_features))
@@ -378,16 +378,16 @@ def _compute_log_det_cholesky(matrix_chol, covariance_type, n_features):
         log_det_chol = np.sum(
             np.log(matrix_chol.reshape(n_components, -1)[:, :: n_features + 1]), 1
         )
-    
+
     elif covariance_type == "tied":
         log_det_chol = np.sum(np.log(np.diag(matrix_chol)))
-    
+
     elif covariance_type == "diag":
         log_det_chol = np.sum(np.log(matrix_chol), axis=1)
-    
+
     else:
         log_det_chol = n_features * (np.log(matrix_chol))
-    
+
     return log_det_chol
 
 
@@ -420,19 +420,19 @@ def _estimate_log_gaussian_prob(X, means, precisions_chol, covariance_type):
     # matrix.
     # In short: det(precision_chol) = - det(precision) / 2
     log_det = _compute_log_det_cholesky(precisions_chol, covariance_type, n_features)
-    
+
     if covariance_type == "full":
         log_prob = np.empty((n_samples, n_components))
         for k, (mu, prec_chol) in enumerate(zip(means, precisions_chol)):
             y = np.dot(X, prec_chol) - np.dot(mu, prec_chol)
             log_prob[:, k] = np.sum(np.square(y), axis=1)
-    
+
     elif covariance_type == "tied":
         log_prob = np.empty((n_samples, n_components))
         for k, mu in enumerate(means):
             y = np.dot(X, precisions_chol) - np.dot(mu, precisions_chol)
             log_prob[:, k] = np.sum(np.square(y), axis=1)
-    
+
     elif covariance_type == "diag":
         precisions = precisions_chol ** 2
         log_prob = (
@@ -440,7 +440,7 @@ def _estimate_log_gaussian_prob(X, means, precisions_chol, covariance_type):
             - 2.0 * np.dot(X, (means * precisions).T)
             + np.dot(X ** 2, precisions.T)
         )
-    
+
     elif covariance_type == "spherical":
         precisions = precisions_chol ** 2
         log_prob = (
@@ -730,21 +730,21 @@ class GaussianMixture:
                 "Estimation requires at least one component"
                 % self.n_components
             )
-        
+
         if self.tol < 0.0:
             raise ValueError(
                 "Invalid value for 'tol': %.5f "
                 "Tolerance used by the EM must be non-negative"
                 % self.tol
             )
-        
+
         if self.max_iter < 1:
             raise ValueError(
                 "Invalid value for 'max_iter': %d "
                 "Estimation requires at least one iteration"
                 % self.max_iter
             )
-        
+
         if self.reg_covar < 0.0:
             raise ValueError(
                 "Invalid value for 'reg_covar': %.5f "
@@ -752,7 +752,7 @@ class GaussianMixture:
                 "non-negative"
                 % self.reg_covar
             )
-        
+
         # Check all the parameters values of the derived class
         self._check_parameters(X)
     
@@ -766,14 +766,14 @@ class GaussianMixture:
                 "['spherical', 'tied', 'diag', 'full']"
                 % self.covariance_type
             )
-        
+
         self.weights_ = _check_weights(self.weights_, self.n_components)
-        
-        
+
+
         self.means_ = _check_means(
             self.means_, self.n_components, n_features
         )
-        
+
         # self.precisions_ = _check_precisions(
         #     self.precisions_,
         #     self.covariance_type,
@@ -812,7 +812,7 @@ class GaussianMixture:
 
     def fit_predict(self, X, y=None):
         """Estimate model parameters using X and predict the labels for X.
-        
+
         The method fits the model n_init times and sets the parameters with
         which the model has the largest likelihood or lower bound. Within each
         trial, the method iterates between E-step and M-step for `max_iter`
@@ -820,18 +820,18 @@ class GaussianMixture:
         `tol`, otherwise, a :class:`~sklearn.exceptions.ConvergenceWarning` is
         raised. After fitting, it predicts the most probable label for the
         input data points.
-        
+
         .. versionadded:: 0.20
-        
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
             List of n_features-dimensional data points. Each row
             corresponds to a single data point.
-        
+
         y : Ignored
             Not used, present for API consistency by convention.
-        
+
         Returns
         -------
         labels : array, shape (n_samples,)
@@ -844,43 +844,43 @@ class GaussianMixture:
                 f"but got n_components = {self.n_components}, "
                 f"n_samples = {X.shape[0]}"
             )
-        
+
         self._check_initial_parameters(X)
-        
+
         self.precisions_cholesky_ = _compute_precision_cholesky(self.covariances_, self.covariance_type)
-        
+
         max_lower_bound = -np.inf
         self.converged_ = False
-        
+
         #random_state = check_random_state(self.random_state)
-        
+
         n_samples, _ = X.shape
         #for init in range(n_init):
         #    self._print_verbose_msg_init_beg(init)
-        
+
         lower_bound = -np.inf #if do_init else self.lower_bound_
-        
+
         for n_iter in range(1, self.max_iter + 1):
             prev_lower_bound = lower_bound
-            
+
             log_prob_norm, log_resp = self._e_step(X)
             self._m_step(X, log_resp)
             lower_bound = self._compute_lower_bound(log_resp, log_prob_norm)
-            
+
             change = lower_bound - prev_lower_bound
             self._print_verbose_msg_iter_end(n_iter, change)
-            
+
             if abs(change) < self.tol:
                 self.converged_ = True
                 break
-        
+
         self._print_verbose_msg_init_end(lower_bound)
-        
+
         if lower_bound > max_lower_bound or max_lower_bound == -np.inf:
             max_lower_bound = lower_bound
             best_params = self._get_parameters()
             best_n_iter = n_iter
-        
+
         if not self.converged_:
             warnings.warn(
                 "Initialization did not converge. "
@@ -888,16 +888,16 @@ class GaussianMixture:
                 "or check for degenerate data.",
                 ConvergenceWarning,
             )
-        
+
         self._set_parameters(best_params)
         self.n_iter_ = best_n_iter
         self.lower_bound_ = max_lower_bound
-        
+
         # Always do a final e-step to guarantee that the labels returned by
         # fit_predict(X) are always consistent with fit(X).predict(X)
         # for any value of max_iter and tol (and any random_state).
         _, log_resp = self._e_step(X)
-        
+
         return log_resp.argmax(axis=1)
 
     def _e_step(self, X):
@@ -935,7 +935,7 @@ class GaussianMixture:
         self.weights_, self.covariances_ = _estimate_gaussian_parameters(
             X, np.exp(log_resp), self.means_, self.reg_covar, self.covariance_type
         )
-        self.weights_ /= n_samples
+        self.weights_ /= self.weights_.sum()
         self.precisions_cholesky_ = _compute_precision_cholesky(
             self.covariances_, self.covariance_type
         )
@@ -995,7 +995,16 @@ class GaussianMixture:
         check_is_fitted(self)
         #X = self._validate_data(X, reset=False)
         return self._estimate_weighted_log_prob(X).argmax(axis=1)
-    
+
+    def _prob_difference(self, probs):
+
+        return (0.1 / (probs.max() - np.partition(probs, -2)[-2])) * 100
+
+    def predict_uncertainties(self, X):
+        check_is_fitted(self)
+        weighted_probs = self._estimate_weighted_log_prob(X)
+        return np.array([self._prob_difference(i) for i in weighted_probs])
+
     def predict_proba(self, X):
         """Evaluate the components' density for each sample.
         

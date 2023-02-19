@@ -10,6 +10,7 @@ from scipy import linalg
 from queue import PriorityQueue
 import pandas as pd
 from matplotlib.patches import Ellipse
+import seaborn as sns
 from sklearn.metrics.pairwise import euclidean_distances
 import scipy.spatial.distance as distance
 from sklearn.neighbors import KernelDensity, KDTree
@@ -585,6 +586,21 @@ def _expand_covariance_matrix(covariances, covariance_type, n_features):
         return covariances
 
 
+def _draw_ellipse(covariances, means, ax):
+    pearson = covariances[0, 1] / np.sqrt(covariances[0, 0] * covariances[1, 1])
+    ell_radius_x = np.sqrt(1 + pearson)
+    ell_radius_y = np.sqrt(1 - pearson)
+    ellipse = Ellipse((0, 0), width=ell_radius_x * 2, height=ell_radius_y * 2, facecolor='none', edgecolor='grey')
+    scale_x = np.sqrt(covariances[0, 0])
+    scale_y = np.sqrt(covariances[1, 1])
+    transf = transforms.Affine2D() \
+        .rotate_deg(45) \
+        .scale(scale_x, scale_y) \
+        .translate(means[0], means[1])
+    ellipse.set_transform(transf + ax.transData)
+    ax.add_patch(ellipse)
+
+
 class REM:
     def __init__(
             self,
@@ -646,8 +662,9 @@ class REM:
             )
 
         if self.bandwidth != "diagonal" or "spherical" or "normal_reference" or isinstance(self.bandwidth,
-                                                                                           int) or isinstance(self.bandwidth,
-                                                                                                              float):
+                                                                                           int) or isinstance(
+            self.bandwidth,
+            float):
             raise ValueError(
                 "Invalid value for 'bandwidth': %s"
                 "'bandwidth' should be 'diagonal', 'spherical', 'normal_reference' or a float."
@@ -659,11 +676,13 @@ class REM:
             message_start = 'Distance threshold provided, but no density threshold provided.'
         else:
             message_start = 'Density threshold provided, but no distance threshold provided.'
-        warnings.warn(message_start + ' Clustering will continue with the max number of components set to ' + str(self._max_components))
+        warnings.warn(message_start + ' Clustering will continue with the max number of components set to ' + str(
+            self._max_components))
 
     def _select_exemplars(self):
         if self._density_threshold is not None and self._distance_threshold is not None:
-            return _select_exemplars_from_thresholds(self.data, self._density, self._distance, self._density_threshold, self._distance_threshold)
+            return _select_exemplars_from_thresholds(self.data, self._density, self._distance, self._density_threshold,
+                                                     self._distance_threshold)
         else:
             if self._density_threshold is not None or self._distance_threshold is not None:
                 self._print_threshold_parameter_warning()
@@ -684,8 +703,8 @@ class REM:
 
     def _add_mixture(self):
         new_mixture = GaussianMixture.GaussianMixture(n_components=self.n_components_iter, weights=self.weights_iter,
-                                                         means=self.means_iter, covariances=self.covariances_iter,
-                                                         covariance_type=self.covariance_type).fit(self.X_iter)
+                                                      means=self.means_iter, covariances=self.covariances_iter,
+                                                      covariance_type=self.covariance_type).fit(self.X_iter)
         self._add_mixture_to_pq(new_mixture)
         self.mixtures.append(new_mixture)
         self.n_mixtures += 1
@@ -962,23 +981,29 @@ class REM:
             raise Exception("No model selected to plot")
         else:
             raise Exception("Cannot plot " + mixture_selection + " selected mixture as the selection criteria was set "
-                                                                 + "to " + self.criteria)
-
-    def _draw_ellipse(self, covariances, means, ax):
-        pearson = covariances[0, 1] / np.sqrt(covariances[0, 0] * covariances[1, 1])
-        ell_radius_x = np.sqrt(1 + pearson)
-        ell_radius_y = np.sqrt(1 - pearson)
-        ellipse = Ellipse((0, 0), width=ell_radius_x * 2, height=ell_radius_y * 2, facecolor='none', edgecolor='grey')
-        scale_x = np.sqrt(covariances[0, 0]) * 2
-        scale_y = np.sqrt(covariances[1, 1]) * 2
-        transf = transforms.Affine2D() \
-            .rotate_deg(45) \
-            .scale(scale_x, scale_y) \
-            .translate(means[0], means[1])
-        ellipse.set_transform(transf + ax.transData)
-        ax.add_patch(ellipse)
+                            + "to " + self.criteria)
 
     def classification_plot(self, mixture_selection=''):
+        self._class_style_plot(mixture_selection, self._draw_classification)
+
+    def uncertainty_plot(self, mixture_selection=''):
+        self._class_style_plot(mixture_selection, self._draw_uncertainty)
+
+    def density_plot(self):
+        dimensions = self.data.shape[1]
+        fig, axs = plt.subplots(dimensions, dimensions, figsize=(15, 8))
+        for i in range(dimensions):
+            for j in range(dimensions):
+                if i != j:
+                    density_data = pd.DataFrame({"x": self.data[:, i], "y": self.data[:, j]})
+                    sns.kdeplot(density_data, ax=axs[j, i], x="x", y="y", warn_singular=False)
+                else:
+                    self._empty_plot(i, axs[i, i])
+        for ax in fig.get_axes():
+            ax.label_outer()
+        plt.show()
+
+    def _class_style_plot(self, mixture_selection, plotting_function):
         _, n_features = self.X_iter.shape
         mixture = self._get_selected_mixture(mixture_selection)
         labels = mixture.predict(self.data)
@@ -988,14 +1013,35 @@ class REM:
         for i in range(dimensions):
             for j in range(dimensions):
                 if i != j:
-                    subplot_data = pd.DataFrame({"x": self.data[:, i], "y": self.data[:, j], "labels": labels})
-                    groups = subplot_data.groupby("labels")
-                    for _, group in groups:
-                        axs[j, i].plot(group.x, group.y, marker="o", linestyle="", markersize=1.5)
+                    plotting_function(i, j, axs[j, i], labels, mixture)
                     for k in range(mixture.n_components):
-                        self._draw_ellipse(expanded_covariances[k], [mixture.means_[k][i], mixture.means_[k][j]], axs[j, i])
+                        _draw_ellipse(np.array([[expanded_covariances[k][i][i], expanded_covariances[k][i][j]],
+                                                [expanded_covariances[k][j][i], expanded_covariances[k][j][j]]]),
+                                      [mixture.means_[k][i], mixture.means_[k][j]],
+                                      axs[j, i])
                         axs[j, i].scatter(mixture.means_[k][i], mixture.means_[k][j], c="black", s=10)
+                else:
+                    self._empty_plot(i, axs[i, i])
+        for ax in fig.get_axes():
+            ax.label_outer()
         plt.show()
+
+    def _empty_plot(self, index, ax):
+        ax.scatter(self.data[:, index], self.data[:, index], marker="none")
+
+    def _draw_uncertainty(self, x_index, y_index, ax, labels, mixture):
+        uncertainty = mixture.predict_uncertainties(self.data)
+        subplot_data = pd.DataFrame({"x": self.data[:, x_index], "y": self.data[:, y_index], "uncertainty": uncertainty,
+                                     "labels": labels})
+        groups = subplot_data.groupby("labels")
+        for _, group in groups:
+            ax.scatter(group.x, group.y, s=group.uncertainty)
+
+    def _draw_classification(self, x_index, y_index, ax, labels, mixture):
+        subplot_data = pd.DataFrame({"x": self.data[:, x_index], "y": self.data[:, y_index], "labels": labels})
+        groups = subplot_data.groupby("labels")
+        for _, group in groups:
+            ax.scatter(group.x, group.y, s=1.5)
 
     def criterion_plot(self):
         plt.figure(figsize=(15, 6))
