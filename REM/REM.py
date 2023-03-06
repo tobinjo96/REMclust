@@ -5,6 +5,7 @@ import math
 import time
 import numpy as np
 from matplotlib import transforms
+from scipy.spatial.distance import mahalanobis
 from numpy.linalg import eig
 from scipy import linalg
 from queue import PriorityQueue
@@ -17,6 +18,7 @@ from sklearn.neighbors import KernelDensity, KDTree
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import warnings
+from .overlap import Overlap
 
 from . import GaussianMixture
 
@@ -776,18 +778,22 @@ class REM:
             weights1 = robjects.FloatVector([i for i in self.weights_iter])
             means1 = robjects.FloatVector([i for i in self.means_iter.flatten()])
             covariances1 = robjects.FloatVector([i for i in covariances_jitter.flatten()])
-            OmegaMap1 = overlap.overlap(Pi=weights1, Mu=means1, S=covariances1)
+            # OmegaMap1 = overlap.overlap(Pi=weights1, Mu=means1, S=covariances1)
+            n_components, _, _ = cov.shape
+            OmegaMap2 = Overlap(n_features, n_components, weights1, means1, covariances1, np.array([1e-06, 1e-06]),
+                                1e06).omega_map
+            # print(OmegaMap1)
+            OmegaMap2 = np.reshape(OmegaMap2, (self.n_components_iter, self.n_components_iter))
+            # print(OmegaMap2)
 
-            OmegaMap1 = np.reshape(OmegaMap1, (self.n_components_iter, self.n_components_iter))
+            OmegaMap2 -= np.diag(np.ones(self.n_components_iter))
 
-            OmegaMap1 -= np.diag(np.ones(self.n_components_iter))
-
-            if np.max(OmegaMap1.max(1)) > 0:
+            if np.max(OmegaMap2.max(1)) > 0:
                 break
             else:
                 covariances_jitter *= 1.1
 
-        return OmegaMap1.max(1)
+        return OmegaMap2.max(1)
 
     def compute_theta(self, distances, covariances_logdet_penalty, overlap_max):
 
@@ -960,6 +966,8 @@ class REM:
             _print_parameter_info(mixture)
 
     def summary(self, parameters=False, classification=False, scores=False):
+        if not self.fitted:
+            raise Exception("Model yet to be fitted")
         if self.criteria == "aic" or self.criteria == "all":
             self.print_summary("aic", self.aics_, self.aic_mixture, parameters=parameters,
                                classification=classification, scores=scores)
@@ -983,56 +991,123 @@ class REM:
             raise Exception("Cannot plot " + mixture_selection + " selected mixture as the selection criteria was set "
                             + "to " + self.criteria)
 
-    def classification_plot(self, mixture_selection=''):
-        self._class_style_plot(mixture_selection, self._draw_classification)
+    def classification_plot(self, mixture_selection='', dimensions=None, axis_labels=None):
+        if self.fitted:
+            self._class_style_plot(mixture_selection, dimensions, self._draw_classification, axis_labels)
+        else:
+            raise Exception("Model yet to be fitted")
 
-    def uncertainty_plot(self, mixture_selection=''):
-        self._class_style_plot(mixture_selection, self._draw_uncertainty)
+    def uncertainty_plot(self, mixture_selection='', dimensions=None, axis_labels=None):
+        if self.fitted:
+            self._class_style_plot(mixture_selection, dimensions, self._draw_uncertainty, axis_labels)
+        else:
+            raise Exception("Model yet to be fitted")
 
-    def density_plot(self):
-        dimensions = self.data.shape[1]
-        fig, axs = plt.subplots(dimensions, dimensions, figsize=(15, 8))
-        for i in range(dimensions):
-            for j in range(dimensions):
-                if i != j:
-                    density_data = pd.DataFrame({"x": self.data[:, i], "y": self.data[:, j]})
-                    sns.kdeplot(density_data, ax=axs[j, i], x="x", y="y", warn_singular=False)
-                else:
-                    self._empty_plot(i, axs[i, i])
+    def density_plot(self, dimensions=None, axis_labels=None):
+        if dimensions is not None and not isinstance(dimensions, list):
+            raise Exception("\"dimensions\" must be a list of integers.")
+        if dimensions is None:
+            dimensions = list(range(self.data.shape[1]))
+        if axis_labels is not None and not isinstance(axis_labels, list):
+            raise Exception("\"axis_labels\" must be a list of strings.")
+        if axis_labels is not None and len(axis_labels) != len(dimensions):
+            warnings.warn("Number of axis labels is not equal to the number of dimensions plotted. Provided labels will"
+                          " not be used")
+            axis_labels = None
+        if len(dimensions) == 2:
+            self._2d_density_plot(dimensions)
+            return
+        fig, axs = plt.subplots(len(dimensions), len(dimensions), figsize=(15, 8))
+        for axis_i, i in enumerate(dimensions):
+            for axis_j, j in enumerate(dimensions):
+                try:
+                    if i != j:
+                        density_data = pd.DataFrame({"x": self.data[:, i], "y": self.data[:, j]})
+                        sns.kdeplot(density_data, ax=axs[axis_j, axis_i], x="x", y="y", warn_singular=False)
+                    else:
+                        self._empty_plot(i, axis_i, axs[axis_i, axis_i], axis_labels)
+                except:
+                    raise Exception(
+                        "An index entered in \"dimensions\" was not valid. Ensure all indexes entered are between 0 "
+                        "and the number of features - 1.")
         for ax in fig.get_axes():
             ax.label_outer()
         plt.show()
 
-    def _class_style_plot(self, mixture_selection, plotting_function):
+    def _2d_density_plot(self, dimensions):
+        try:
+            density_data = pd.DataFrame({"x": self.data[:, dimensions[0]], "y": self.data[:, dimensions[1]]})
+            sns.kdeplot(density_data, x="x", y="y", warn_singular=False)
+        except:
+            raise Exception("An index entered in \"dimensions\" was not valid. Ensure all indexes entered are between 0 "
+                            "and the number of features - 1.")
+        plt.show()
+
+    def _class_style_plot(self, mixture_selection, dimensions, plotting_function, axis_labels):
+        if dimensions is not None and not isinstance(dimensions, list):
+            raise Exception("\"dimensions\" must be a list of integers.")
+        if dimensions is None:
+            dimensions = list(range(self.data.shape[1]))
+        if axis_labels is not None and not isinstance(axis_labels, list):
+            raise Exception("\"axis_labels\" must be a list of strings.")
+        if axis_labels is not None and len(axis_labels) != len(dimensions):
+            warnings.warn("Number of axis labels is not equal to the number of dimensions plotted. Provided labels will"
+                          " not be used")
+            axis_labels = None
         _, n_features = self.X_iter.shape
         mixture = self._get_selected_mixture(mixture_selection)
+        if len(dimensions) == 2:
+            self._2d_class_plot(mixture, plotting_function, dimensions, n_features, axis_labels)
+            return
         labels = mixture.predict(self.data)
-        dimensions = self.data.shape[1]
-        fig, axs = plt.subplots(dimensions, dimensions, figsize=(15, 8))
+        fig, axs = plt.subplots(len(dimensions), len(dimensions), figsize=(15, 8))
         expanded_covariances = _expand_covariance_matrix(mixture.covariances_, self.covariance_type, n_features)
-        for i in range(dimensions):
-            for j in range(dimensions):
+        for axis_i, i in enumerate(dimensions):
+            for axis_j, j in enumerate(dimensions):
                 if i != j:
-                    plotting_function(i, j, axs[j, i], labels, mixture)
+                    plotting_function(i, j, axs[axis_j, axis_i], labels, mixture)
                     for k in range(mixture.n_components):
                         _draw_ellipse(np.array([[expanded_covariances[k][i][i], expanded_covariances[k][i][j]],
                                                 [expanded_covariances[k][j][i], expanded_covariances[k][j][j]]]),
                                       [mixture.means_[k][i], mixture.means_[k][j]],
-                                      axs[j, i])
-                        axs[j, i].scatter(mixture.means_[k][i], mixture.means_[k][j], c="black", s=10)
+                                      axs[axis_j, axis_i])
+                        axs[axis_j, axis_i].scatter(mixture.means_[k][i], mixture.means_[k][j], c="black", s=10)
                 else:
-                    self._empty_plot(i, axs[i, i])
+                    self._empty_plot(i, axis_i, axs[axis_i, axis_i], axis_labels)
         for ax in fig.get_axes():
             ax.label_outer()
         plt.show()
 
-    def _empty_plot(self, index, ax):
+    def _2d_class_plot(self, mixture, plotting_function, dimensions, n_features, axis_labels):
+        labels = mixture.predict(self.data)
+        fig, ax = plt.subplots()
+        plotting_function(dimensions[0], dimensions[1], ax, labels, mixture)
+        expanded_covariances = _expand_covariance_matrix(mixture.covariances_, self.covariance_type, n_features)
+        for i in range(mixture.n_components):
+            _draw_ellipse(np.array([[expanded_covariances[i][dimensions[0]][dimensions[0]],
+                                     expanded_covariances[i][dimensions[0]][dimensions[1]]],
+                                    [expanded_covariances[i][dimensions[1]][dimensions[0]],
+                                     expanded_covariances[i][dimensions[1]][dimensions[1]]]]),
+                          [mixture.means_[i][dimensions[0]], mixture.means_[i][dimensions[1]]],
+                          ax)
+            ax.scatter(mixture.means_[i][dimensions[0]], mixture.means_[i][dimensions[1]], c="black", s=10)
+        plt.show()
+
+    def _empty_plot(self, index, ax_index, ax, axis_labels):
+        label = "C" + str(index) if axis_labels is None else axis_labels[ax_index]
         ax.scatter(self.data[:, index], self.data[:, index], marker="none")
+        ax.text(0.5, 0.5,label, horizontalalignment="center", verticalalignment="center",
+                transform=ax.transAxes, fontsize=20)
 
     def _draw_uncertainty(self, x_index, y_index, ax, labels, mixture):
         uncertainty = mixture.predict_uncertainties(self.data)
-        subplot_data = pd.DataFrame({"x": self.data[:, x_index], "y": self.data[:, y_index], "uncertainty": uncertainty,
-                                     "labels": labels})
+        try:
+            subplot_data = pd.DataFrame(
+                {"x": self.data[:, x_index], "y": self.data[:, y_index], "uncertainty": uncertainty,
+                 "labels": labels})
+        except:
+            raise Exception("An index entered in \"dimensions\" was not valid. Ensure all indexes entered are between 0 "
+                            "and the number of features - 1.")
         groups = subplot_data.groupby("labels")
         for _, group in groups:
             ax.scatter(group.x, group.y, s=group.uncertainty)
