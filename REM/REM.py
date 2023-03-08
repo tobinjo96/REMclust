@@ -1096,7 +1096,7 @@ class REM:
     def _empty_plot(self, index, ax_index, ax, axis_labels):
         label = "C" + str(index) if axis_labels is None else axis_labels[ax_index]
         ax.scatter(self.data[:, index], self.data[:, index], marker="none")
-        ax.text(0.5, 0.5,label, horizontalalignment="center", verticalalignment="center",
+        ax.text(0.5, 0.5, label, horizontalalignment="center", verticalalignment="center",
                 transform=ax.transAxes, fontsize=20)
 
     def _draw_uncertainty(self, x_index, y_index, ax, labels, mixture):
