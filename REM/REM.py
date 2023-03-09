@@ -22,15 +22,6 @@ from .overlap import Overlap
 
 from . import GaussianMixture
 
-import rpy2.robjects as robjects
-from rpy2.robjects.packages import STAP
-
-with open('REM/Overlap.R', 'r') as f:
-    string = f.read()
-
-overlap = STAP(string, "overlap")
-
-
 ###############################################################################
 # Input parameter checkers used by the REM class
 def density_broad_search_star(a_b):
@@ -442,25 +433,19 @@ class REM:
             covariances_jitter[i, :, :] = vec.dot(np.diag(val)).dot(np.linalg.inv(vec))
 
         while True:
-            weights1 = robjects.FloatVector([i for i in self.weights_iter])
-            means1 = robjects.FloatVector([i for i in self.means_iter.flatten()])
-            covariances1 = robjects.FloatVector([i for i in covariances_jitter.flatten()])
-            # OmegaMap1 = overlap.overlap(Pi=weights1, Mu=means1, S=covariances1)
             n_components, _, _ = cov.shape
-            OmegaMap2 = Overlap(n_features, n_components, weights1, means1, covariances1, np.array([1e-06, 1e-06]),
-                                1e06).omega_map
-            # print(OmegaMap1)
-            OmegaMap2 = np.reshape(OmegaMap2, (self.n_components_iter, self.n_components_iter))
-            # print(OmegaMap2)
+            omega_map = Overlap(n_features, n_components, self.weights_iter, self.means_iter, covariances_jitter,
+                                np.array([1e-06, 1e-06]), 1e06).omega_map
+            omega_map = np.reshape(omega_map, (self.n_components_iter, self.n_components_iter))
 
-            OmegaMap2 -= np.diag(np.ones(self.n_components_iter))
+            omega_map -= np.diag(np.ones(self.n_components_iter))
 
-            if np.max(OmegaMap2.max(1)) > 0:
+            if np.max(omega_map.max(1)) > 0:
                 break
             else:
                 covariances_jitter *= 1.1
 
-        return OmegaMap2.max(1)
+        return omega_map.max(1)
 
     def compute_theta(self, distances, covariances_logdet_penalty, overlap_max):
 

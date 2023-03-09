@@ -24,8 +24,8 @@ class Overlap:
         self.p = p
         self.k = k
         self.pi = pi
-        self.mu = np.reshape(mu, (k, p))
-        self.s = np.reshape(s, (k, p, p))
+        self.mu = mu
+        self.s = s
         self.pars = pars
         self.lim = lim
         self.ifault = None
