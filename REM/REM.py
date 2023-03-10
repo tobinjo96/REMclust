@@ -285,19 +285,11 @@ class REM:
         self.tol = tol
         self.reg_covar = reg_covar
         self.max_iter = max_iter
-        self.n_mixtures = 0
         self._distance = None
         self._density = None
         self._density_threshold = None
         self._max_components = None
         self._distance_threshold = None
-        self.weights_iter = None
-        self.covariances_iter = None
-        self.mixtures = []
-        self.aics_ = PriorityQueue()
-        self.bics_ = PriorityQueue()
-        self.icls_ = PriorityQueue()
-        self._check_parameters()
 
     def _check_parameters(self):
         """Check the Gaussian mixture parameters are well defined."""
@@ -388,7 +380,6 @@ class REM:
 
         while True:
             n_components, _, _ = cov.shape
-            print(n_components)
             omega_map = Overlap(n_features, n_components, self.weights_iter, self.means_iter, covariances_jitter,
                                 np.array([1e-06, 1e-06]), 1e06).omega_map
             if np.max(omega_map.max(1)) > 0:
@@ -403,6 +394,7 @@ class REM:
         n_samples, _ = self.X_iter.shape
 
         thetas = np.ones(self.n_components_iter) * np.nan
+        entry = False
 
         for i in range(self.n_components_iter):
             P = distances + covariances_logdet_penalty - (distances[:, i] + covariances_logdet_penalty[i])[:,
@@ -448,10 +440,10 @@ class REM:
                 end = end_temp if end is None else min(end, end_temp)
 
             if start is not None and end is not None and end > start > 0:
+                entry = True
                 thetas[i] = start
-            else:
-                return None
-
+        if not entry:
+            return None
         theta = thetas[~np.isnan(thetas)].min()
 
         return theta * 1.0001
@@ -574,18 +566,18 @@ class REM:
         if parameters:
             _print_parameter_info(mixture)
 
-    def summary(self, parameters=False, classification=False, scores=False):
+    def summary(self, parameters=False, classification=False, criterion_scores=False):
         if not self.fitted:
             raise Exception("Model yet to be fitted")
         if self.criteria == "aic" or self.criteria == "all":
             self.print_summary("aic", self.aics_, self.aic_mixture, parameters=parameters,
-                               classification=classification, scores=scores)
+                               classification=classification, scores=criterion_scores)
         if self.criteria == "bic" or self.criteria == "all":
             self.print_summary("bic", self.bics_, self.bic_mixture, parameters=parameters,
-                               classification=classification, scores=scores)
+                               classification=classification, scores=criterion_scores)
         if self.criteria == "icl" or self.criteria == "all":
             self.print_summary("icl", self.icls_, self.icl_mixture, parameters=parameters,
-                               classification=classification, scores=scores)
+                               classification=classification, scores=criterion_scores)
 
     def _get_selected_mixture(self, mixture_selection):
         if self.criteria == "aic" or (self.criteria == "all" and str.lower(mixture_selection) == "aic"):
@@ -744,6 +736,13 @@ class REM:
 
     def fit(self, max_components=5, density_threshold=None, distance_threshold=None):
         self.t1 = time.perf_counter()
+        self.weights_iter = None
+        self.covariances_iter = None
+        self.mixtures = []
+        self.aics_ = PriorityQueue()
+        self.bics_ = PriorityQueue()
+        self.icls_ = PriorityQueue()
+        self.n_mixtures = 0
         self._max_components = max_components
         self._density_threshold = density_threshold
         self._distance_threshold = distance_threshold
