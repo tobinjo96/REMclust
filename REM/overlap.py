@@ -43,7 +43,12 @@ class Overlap:
         sinv = np.zeros((self.k, self.p, self.p))
         for i in range(self.k):
             ga = self.s[i]
-            val, determinant, ga = self.cephes_symmeigens_down(self.p, ga)
+            val, vec = eigh(ga)
+            determinant = np.prod(val)
+
+            for j in range(self.p):
+                for k in range(self.p):
+                    ga[k][self.p - j - 1] = vec[j][k]
             dets[i] = determinant
 
             l = np.diag(np.float_power(val, 0.5))
@@ -60,7 +65,10 @@ class Overlap:
                 m2 = m1 * -1
 
                 si = np.matmul(np.matmul(sh[i], sinv[j]), np.transpose(sh[i]))
-                val, determinant, si = self.cephes_symmeigens_down(self.p, si)
+                val, vec = eigh(si)
+                for k in range(self.p):
+                    for l in range(self.p):
+                        si[l][self.p - k - 1] = vec[k][l]
                 self.li[i][j] = val
                 ga = np.matmul(sinv[i], sh[i])
                 val = ga.dot(m1)
@@ -69,7 +77,10 @@ class Overlap:
                 self.di[i][j] = m1
 
                 si = np.matmul(np.matmul(sh[j], sinv[i]), np.transpose(sh[j]))
-                val, determinant, si = self.cephes_symmeigens_down(self.p, si)
+                val, vec = eigh(si)
+                for k in range(self.p):
+                    for l in range(self.p):
+                        si[l][self.p - k - 1] = vec[k][l]
                 self.li[j][i] = val
                 ga = np.matmul(sinv[j], sh[j])
                 val = ga.dot(m2)
@@ -77,100 +88,9 @@ class Overlap:
                 m2 = ga.dot(val)
                 self.di[j][i] = m2
 
-                self.const1[i][j] = math.log((self.pi[j] * self.pi[j]) / (self.pi[i] * self.pi[i]) * dets[i] / dets[j])
+                self.const1[i][j] = math.log(mp.fmul(self.pi[j], self.pi[j]) / mp.fmul(self.pi[i], self.pi[i]) * dets[i] / dets[j])
                 self.const1[j][i] = -self.const1[i][j]
 
-    def cephes_symmeigens_down(self, p, a):
-        As = np.zeros(int(p * (p + 1) / 2))
-        eigen_values = np.zeros(p)
-        for i in range(p):
-            for j in range(i+1):
-                As[int((i * i + i) / 2) + j] = a[i][j]
-        e_vec, e_vals = self.cephes_eigens(As, p)
-        for i in range(p):
-            eigen_values[i] = e_vals[p - i - 1]
-        for i in range(p):
-            for j in range(p):
-                a[j][p-i-1] = e_vec[p * i + j]
-        determinant = np.prod(eigen_values)
-        return eigen_values, determinant, a
-
-    def cephes_eigens(self, a, n):
-        range1 = 1.0e-10
-        e = np.zeros(n)
-        ev = np.zeros(n*n)
-        mm = 0
-        for i in range(n):
-            ev[mm+i] = 1.0
-            mm += n
-        anorm = 0.0
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    ia = int(i + (j*j+j) / 2)
-                    aia = a[ia]
-                    anorm += aia * aia
-        if anorm <= 0.0:
-            l = 0
-            for i in range(n):
-                l += i
-                e[i - 1] = a[l - 1]
-            return ev, e
-        anorm = math.sqrt(anorm + anorm)
-        anormx = anorm * range1 / n
-        thr = anorm
-        while thr > anormx:
-            thr = thr / n
-            ind = 1
-            while ind != 0:
-                ind = 0
-                for i in range(n-1):
-                    for j in range(i+1, n):
-                        mq = (j * j + j) / 2
-                        lm = int(i + mq)
-                        alm = a[lm]
-                        if math.fabs(alm) < thr:
-                            continue
-                        ind = 1
-                        lq = (i * i + i) / 2
-                        ll = int(i + lq)
-                        mm = int(j + mq)
-                        all = a[ll]
-                        amm = a[mm]
-                        x = (all - amm) / 2.0
-                        y = -alm / math.sqrt(alm * alm + x * x)
-                        if x < 0.0:
-                            y = -y
-                        sinx = y / math.sqrt(2.0 * (1.0 + math.sqrt(1.0 - y * y)))
-                        sinx2 = sinx * sinx
-                        cosx = math.sqrt(1.0 - sinx2)
-                        cosx2 = cosx * cosx
-                        sincs = sinx * cosx
-                        for l in range(n):
-                            iq = (l * l + l) / 2
-                            if (l != j) and (l != i):
-                                im = j + iq if l > j else l + mq
-                                il = i + iq if l >= i else l + lq
-                                ail = a[int(il)]
-                                aim = a[int(im)]
-                                x = ail * cosx - aim * sinx
-                                a[int(im)] = ail * sinx + aim * cosx
-                                a[int(il)] = x
-                            nli = n * i + l
-                            nmi = n * j + l
-                            rli = ev[nli]
-                            rmi = ev[nmi]
-                            ev[nli] = rli * cosx - rmi * sinx
-                            ev[nmi] = rli * sinx + rmi * cosx
-                        x = 2.0 * alm * sincs
-                        a[int(ll)] = all * cosx2 + amm * sinx2 - x
-                        a[int(mm)] = all * sinx2 + amm * cosx2 + x
-                        a[int(lm)] = (all - amm) * sincs + alm * (cosx2 - sinx2)
-        l = 0
-        for i in range(n):
-            l += i
-            e[i - 1] = a[l - 1]
-        return ev, e
 
     def get_omega_map(self):
         self.acc = self.pars[1]
@@ -234,7 +154,7 @@ class Overlap:
                     i += 1
                     j = i + 1
         for l in range(self.k):
-            self.omega_map[l][l] = 1.0
+            self.omega_map[l][l] = 0.0
 
     def exp1(self, x):
         return 0.0 if x < -50.0 else mp.exp(x)
@@ -467,7 +387,6 @@ class Overlap:
                 qfval = 0.0
                 return qfval
             intv = 2.0 * math.pi / max(d1, d2)
-
             xnt = utx / intv
             xntm = 3.0 / math.sqrt(acc1)
             if xnt > xntm * 1.5:
@@ -493,7 +412,7 @@ class Overlap:
                 break
         if xnt > xlim:
             raise Exception('required accuracy NOT achieved')
-        nt = int(math.floor(xnt + 0.5))
+        nt = int(math.floor(xnt + 0.5)) if not math.isnan(xnt) else -1
         self.integrate(nt, intv, 0.0, True)
         qfval = 0.5 - self.intl
 

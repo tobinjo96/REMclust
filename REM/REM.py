@@ -22,6 +22,7 @@ from .overlap import Overlap
 
 from . import GaussianMixture
 
+
 ###############################################################################
 # Input parameter checkers used by the REM class
 def density_broad_search_star(a_b):
@@ -193,6 +194,7 @@ def _initialize_covariances(X, means, covariance_type):
         covariances = np.ones((n_components, n_features)) * variance
     return covariances
 
+
 def _get_mixture_score(X, mixture_scores, scoring_function):
     mixture_scores.append(scoring_function(X))
 
@@ -267,14 +269,11 @@ class REM:
             *,
             data,
             covariance_type="full",
-            criteria="none",
+            criteria="all",
             bandwidth="diagonal",
             tol=1e-3,
             reg_covar=1e-6,
             max_iter=100,
-            random_state=None,
-            verbose=0,
-            verbose_interval=10,
     ):
         self.data = data
         self.fitted = False
@@ -286,9 +285,6 @@ class REM:
         self.tol = tol
         self.reg_covar = reg_covar
         self.max_iter = max_iter
-        self.random_state = random_state
-        self.verbose = verbose
-        self.verbose_interval = verbose_interval
         self.n_mixtures = 0
         self._distance = None
         self._density = None
@@ -301,6 +297,7 @@ class REM:
         self.aics_ = PriorityQueue()
         self.bics_ = PriorityQueue()
         self.icls_ = PriorityQueue()
+        self._check_parameters()
 
     def _check_parameters(self):
         """Check the Gaussian mixture parameters are well defined."""
@@ -313,7 +310,7 @@ class REM:
                 % self.covariance_type
             )
 
-        if self.criteria not in ["none", "aic", "bic", "icl"]:
+        if self.criteria not in ["all", "aic", "bic", "icl"]:
             raise ValueError(
                 "Invalid value for 'criteria': %s "
                 "'criteria' should be in "
@@ -321,12 +318,10 @@ class REM:
                 % self.criteria
             )
 
-        if self.bandwidth != "diagonal" or "spherical" or "normal_reference" or isinstance(self.bandwidth,
-                                                                                           int) or isinstance(
-            self.bandwidth,
-            float):
+        if self.bandwidth not in ["diagonal", "spherical", "normal_reference"] and \
+                not isinstance(self.bandwidth, int) and not isinstance(self.bandwidth, float):
             raise ValueError(
-                "Invalid value for 'bandwidth': %s"
+                "Hello Invalid value for 'bandwidth': %s"
                 "'bandwidth' should be 'diagonal', 'spherical', 'normal_reference' or a float."
                 % self.bandwidth
             )
@@ -364,7 +359,8 @@ class REM:
     def _add_mixture(self):
         new_mixture = GaussianMixture.GaussianMixture(n_components=self.n_components_iter, weights=self.weights_iter,
                                                       means=self.means_iter, covariances=self.covariances_iter,
-                                                      covariance_type=self.covariance_type).fit(self.X_iter)
+                                                      covariance_type=self.covariance_type, max_iter=self.max_iter,
+                                                      tol=self.tol, reg_covar=self.reg_covar).fit(self.X_iter)
         self._add_mixture_to_pq(new_mixture)
         self.mixtures.append(new_mixture)
         self.n_mixtures += 1
@@ -384,48 +380,6 @@ class REM:
         self._add_mixture()
 
     def compute_overlap(self, n_features, cov):
-        # 
-        # n_components = self.n_components_iter
-        # weights = self.weights_iter
-        # means = self.means_iter
-        # covariances = self.covariances_iter
-        # 
-        # eps = 1e-6
-        # lim = int(1e6)
-        # 
-        # n_features_c = ctypes.c_int(n_features)
-        # n_components_c = ctypes.c_int(n_components)
-        # weights = weights.astype(np.float64)
-        # means1 = means.flatten()
-        # means1 = means1.astype(np.float64)
-        # covariances1 = covariances.flatten()
-        # covariances1 = covariances1.astype(np.float64)
-        # pars = np.array([eps, eps]).astype(np.float64)
-        # lim = ctypes.c_int(lim)
-        # OmegaMap1 = np.zeros(n_components ** 2).astype(np.float64)
-        # BarOmega = ctypes.c_double(1)
-        # MaxOmega = ctypes.c_double(1)
-        # rcMax = np.array([0, 0]).astype(int)
-        # 
-        # 
-        # n_features_ptr = ctypes.byref(n_features_c)
-        # n_components_ptr = ctypes.byref(n_components_c)
-        # weights_ptr = weights.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
-        # means1_ptr = means1.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
-        # covariances1_ptr = covariances1.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
-        # pars_ptr = pars.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
-        # lim_ptr = ctypes.byref(lim)
-        # OmegaMap1_ptr = OmegaMap1.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
-        # BarOmega_ptr = ctypes.byref(BarOmega)
-        # MaxOmega_ptr = ctypes.byref(MaxOmega)
-        # rcMax_ptr = rcMax.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
-        # 
-        # overlap.runExactOverlap.argtypes = (ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int))
-        # overlap.runExactOverlap.restypes = None
-        # 
-        # overlap.runExactOverlap(n_features_ptr, n_components_ptr, weights_ptr, means1_ptr, covariances1_ptr, pars_ptr, lim_ptr, OmegaMap1_ptr, BarOmega_ptr, MaxOmega_ptr, rcMax_ptr)
-        # 
-
         covariances_jitter = np.zeros(cov.shape)
         for i in range(self.n_components_iter):
             val, vec = np.linalg.eig(cov[i])
@@ -434,12 +388,9 @@ class REM:
 
         while True:
             n_components, _, _ = cov.shape
+            print(n_components)
             omega_map = Overlap(n_features, n_components, self.weights_iter, self.means_iter, covariances_jitter,
                                 np.array([1e-06, 1e-06]), 1e06).omega_map
-            omega_map = np.reshape(omega_map, (self.n_components_iter, self.n_components_iter))
-
-            omega_map -= np.diag(np.ones(self.n_components_iter))
-
             if np.max(omega_map.max(1)) > 0:
                 break
             else:
@@ -490,14 +441,16 @@ class REM:
 
             union_intervals = [item for sublist in union_intervals for item in sublist]
 
-            start, end = union_intervals.pop()
+            start, end = None, None
             while union_intervals:
                 start_temp, end_temp = union_intervals.pop()
-                start = max(start, start_temp)
-                end = min(end, end_temp)
+                start = start_temp if start is None else max(start, start_temp)
+                end = end_temp if end is None else min(end, end_temp)
 
-            if start < end and start > 0:
+            if start is not None and end is not None and end > start > 0:
                 thetas[i] = start
+            else:
+                return None
 
         theta = thetas[~np.isnan(thetas)].min()
 
@@ -525,7 +478,7 @@ class REM:
 
         self.n_components_iter = len(self.weights_iter)
 
-    def prune_exemplar(self):
+    def _prune_exemplar(self):
 
         n_samples, n_features = self.X_iter.shape
 
@@ -548,6 +501,8 @@ class REM:
             warnings.simplefilter("ignore")
 
             theta = self.compute_theta(distances, covariances_logdet_penalty, overlap_max)
+            if theta is None:
+                return True
 
         Ob = distances + covariances_logdet_penalty + (theta * overlap_max)
 
@@ -558,16 +513,18 @@ class REM:
         resps[range(resps.shape[0]), s_min] = 1
 
         self.return_refined(resps)
+        return False
 
-    def update_mixture(self):
+    def _update_mixture(self):
         self._add_mixture()
         self.weights_iter = self.mixtures[-1].weights_
         self.covariances_iter = self.mixtures[-1].covariances_
 
     def _iterative_REM_procedure(self):
         while self.n_components_iter > 1:
-            self.prune_exemplar()
-            self.update_mixture()
+            if self._prune_exemplar():
+                break
+            self._update_mixture()
 
     def _set_optimal_mixture(self):
         if self.criteria == "aic" or self.criteria == "all":
@@ -691,8 +648,9 @@ class REM:
             density_data = pd.DataFrame({"x": self.data[:, dimensions[0]], "y": self.data[:, dimensions[1]]})
             sns.kdeplot(density_data, x="x", y="y", warn_singular=False)
         except:
-            raise Exception("An index entered in \"dimensions\" was not valid. Ensure all indexes entered are between 0 "
-                            "and the number of features - 1.")
+            raise Exception(
+                "An index entered in \"dimensions\" was not valid. Ensure all indexes entered are between 0 "
+                "and the number of features - 1.")
         plt.show()
 
     def _class_style_plot(self, mixture_selection, dimensions, plotting_function, axis_labels):
@@ -758,8 +716,9 @@ class REM:
                 {"x": self.data[:, x_index], "y": self.data[:, y_index], "uncertainty": uncertainty,
                  "labels": labels})
         except:
-            raise Exception("An index entered in \"dimensions\" was not valid. Ensure all indexes entered are between 0 "
-                            "and the number of features - 1.")
+            raise Exception(
+                "An index entered in \"dimensions\" was not valid. Ensure all indexes entered are between 0 "
+                "and the number of features - 1.")
         groups = subplot_data.groupby("labels")
         for _, group in groups:
             ax.scatter(group.x, group.y, s=group.uncertainty)
@@ -783,7 +742,7 @@ class REM:
         plt.legend()
         plt.show()
 
-    def fit(self, y=None, max_components=10, density_threshold=None, distance_threshold=None):
+    def fit(self, max_components=5, density_threshold=None, distance_threshold=None):
         self.t1 = time.perf_counter()
         self._max_components = max_components
         self._density_threshold = density_threshold
