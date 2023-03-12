@@ -199,6 +199,25 @@ def _get_mixture_score(X, mixture_scores, scoring_function):
     mixture_scores.append(scoring_function(X))
 
 
+def _get_intervals(n_samples, ltidx, gtidx, ranges):
+    raw_intervals = []
+    union_intervals = []
+    for s in range(n_samples):
+        raw_intervals.append([])
+        union_intervals.append([])
+        for t in ltidx:
+            raw_intervals[s].append((-np.inf, ranges[s, t]))
+        for t in gtidx:
+            raw_intervals[s].append((ranges[s, t], np.inf))
+        for begin, end in sorted(raw_intervals[s]):
+            if union_intervals[s] and union_intervals[s][-1][1] >= begin - 1:
+                union_intervals[s][-1][1] = max(union_intervals[s][-1][1], end)
+            else:
+                union_intervals[s].append([begin, end])
+    return [item for sublist in union_intervals for item in sublist]
+
+
+
 def _print_mixing_proportions(weights):
     print("Mixing proportions:")
     format_row = "{:>22}" * (len(weights))
@@ -208,7 +227,7 @@ def _print_mixing_proportions(weights):
 
 def _print_means(means):
     print("Means:")
-    format_row = "{:>6}" * (len(means[0]) + 1)
+    format_row = "{:>22}" * (len(means[0]) + 1)
     labels = [""] + ["[,{}]".format(i) for i in range(len(means[0]))]
     print(format_row.format(*labels))
     for i, j in enumerate(means):
@@ -220,7 +239,7 @@ def _print_means(means):
 def _print_covariances(covariances, covariance_type, n_features):
     expanded_covariances = _expand_covariance_matrix(covariances, covariance_type, n_features)
     print("Variances:")
-    format_row = "{:>20}" * (len(expanded_covariances[0][0]) + 1)
+    format_row = "{:>22}" * (len(expanded_covariances[0][0]) + 1)
     for i, j in enumerate(expanded_covariances):
         label = "[{},,]".format(i)
         print(label)
@@ -371,141 +390,123 @@ class REM:
         self.weights_iter = np.ones((self.n_components_iter)) / self.n_components_iter
         self._add_mixture()
 
-    def compute_overlap(self, n_features, cov):
+    def _prune_exemplar(self):
+        n_samples, covariances_logdet_penalty, overlap_max, distances, theta = self._get_pruning_parameters()
+        if theta is None:
+            return True
+        Ob = distances + covariances_logdet_penalty + (theta * overlap_max)
+        s_min = Ob.argmin(1)
+        resps = np.zeros((n_samples, self.n_components_iter))
+        resps[range(resps.shape[0]), s_min] = 1
+        self.return_refined(resps)
+        return False
+
+    def _get_pruning_parameters(self):
+        n_samples, n_features = self.X_iter.shape
+        covariances_logdet_penalty, expanded_covariance_iter = self._alter_covariances(n_features, n_samples)
+        overlap_max = self._compute_overlap(n_features, expanded_covariance_iter)
+        distances = self._get_distances(n_samples, expanded_covariance_iter)
+        theta = self._get_theta(distances, covariances_logdet_penalty, overlap_max)
+        return n_samples, covariances_logdet_penalty, overlap_max, distances, theta
+
+    def _alter_covariances(self, n_features, n_samples):
+        self.covariances_iter += np.ones(self.covariances_iter.shape) * 1e-6
+        expanded_covariance_iter = _expand_covariance_matrix(self.covariances_iter, self.covariance_type, n_features)
+        covariances_logdet_penalty = np.array(
+            [np.log(np.linalg.det(expanded_covariance_iter[i])) for i in range(self.n_components_iter)]) / n_samples
+        return covariances_logdet_penalty, expanded_covariance_iter
+
+    def _compute_overlap(self, n_features, cov):
+        covariances_jitter = self._update_covariance_for_overlap(n_features, cov)
+        return self._get_omega_map(n_features, covariances_jitter)
+
+    def _update_covariance_for_overlap(self, n_features, cov):
         covariances_jitter = np.zeros(cov.shape)
         for i in range(self.n_components_iter):
             val, vec = np.linalg.eig(cov[i])
             val += np.abs(np.random.normal(loc=0, scale=0.01, size=n_features))
             covariances_jitter[i, :, :] = vec.dot(np.diag(val)).dot(np.linalg.inv(vec))
+        return covariances_jitter
 
+    def _get_omega_map(self, n_features, covariances_jitter):
         while True:
-            n_components, _, _ = cov.shape
+            n_components, _, _ = covariances_jitter.shape
             omega_map = Overlap(n_features, n_components, self.weights_iter, self.means_iter, covariances_jitter,
                                 np.array([1e-06, 1e-06]), 1e06).omega_map
             if np.max(omega_map.max(1)) > 0:
                 break
             else:
                 covariances_jitter *= 1.1
-
         return omega_map.max(1)
 
-    def compute_theta(self, distances, covariances_logdet_penalty, overlap_max):
+    def _get_distances(self, n_samples, covariances):
+        distances = np.zeros((n_samples, self.n_components_iter))
+        for j in range(self.n_components_iter):
+            distances[:, j, np.newaxis] = distance.cdist(self.X_iter, self.means_iter[j, :][np.newaxis],
+                                                         metric='mahalanobis', VI=covariances[j, :, :])
+        return distances
 
+    def _get_theta(self, distances, covariances_logdet_penalty, overlap_max):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return self._compute_theta(distances, covariances_logdet_penalty, overlap_max)
+
+    def _compute_theta(self, distances, covariances_logdet_penalty, overlap_max):
         n_samples, _ = self.X_iter.shape
-
         thetas = np.ones(self.n_components_iter) * np.nan
         entry = False
-
         for i in range(self.n_components_iter):
-            P = distances + covariances_logdet_penalty - (distances[:, i] + covariances_logdet_penalty[i])[:,
+            p = distances + covariances_logdet_penalty - (distances[:, i] + covariances_logdet_penalty[i])[:,
                                                          np.newaxis]
-
-            Ranges = P / (overlap_max[i] - overlap_max)
-
+            ranges = p / (overlap_max[i] - overlap_max)
             noni_idx = list(range(self.n_components_iter))
             noni_idx.pop(i)
-
             overlap_noni = overlap_max[noni_idx]
-
-            Ranges = Ranges[:, noni_idx]
-
+            ranges = ranges[:, noni_idx]
             ltidx = np.where(overlap_max[i] < overlap_noni)[0]
-
             gtidx = np.where(overlap_max[i] > overlap_noni)[0]
-
-            raw_intervals = []
-            union_intervals = []
-            for s in range(n_samples):
-                raw_intervals.append([])
-                union_intervals.append([])
-                for t in ltidx:
-                    raw_intervals[s].append((-np.inf, Ranges[s, t]))
-
-                for t in gtidx:
-                    raw_intervals[s].append((Ranges[s, t], np.inf))
-
-                for begin, end in sorted(raw_intervals[s]):
-                    if union_intervals[s] and union_intervals[s][-1][1] >= begin - 1:
-                        union_intervals[s][-1][1] = max(union_intervals[s][-1][1], end)
-
-                    else:
-                        union_intervals[s].append([begin, end])
-
-            union_intervals = [item for sublist in union_intervals for item in sublist]
-
+            union_intervals = _get_intervals(n_samples, ltidx, gtidx, ranges)
             start, end = None, None
             while union_intervals:
                 start_temp, end_temp = union_intervals.pop()
                 start = start_temp if start is None else max(start, start_temp)
                 end = end_temp if end is None else min(end, end_temp)
-
             if start is not None and end is not None and end > start > 0:
                 entry = True
                 thetas[i] = start
         if not entry:
             return None
         theta = thetas[~np.isnan(thetas)].min()
-
         return theta * 1.0001
 
     def return_refined(self, resps):
+        self._update_weights(resps)
+        self._add_exemplar_to_data()
+        self._remove_pruned_mean()
+        self._remove_pruned_covariance()
+        self._remove_pruned_component()
 
+    def _update_weights(self, resps):
         self.weights_iter = resps.sum(0) / resps.shape[0]
-
         self.weights_iter[self.weights_iter < 0.00001] = 0
 
+    def _add_exemplar_to_data(self):
         rm_means = self.means_iter[self.weights_iter == 0, :]
-
         if rm_means.ndim == 1:
             self.X_iter = np.append(self.X_iter, rm_means[:, np.newaxis], axis=0)
         else:
             self.X_iter = np.append(self.X_iter, rm_means, axis=0)
 
+    def _remove_pruned_mean(self):
         self.means_iter = self.means_iter[self.weights_iter != 0, :]
 
+    def _remove_pruned_covariance(self):
         if self.covariance_type != 'tied':
             self.covariances_iter = self.covariances_iter[self.weights_iter != 0]
 
+    def _remove_pruned_component(self):
         self.weights_iter = self.weights_iter[self.weights_iter != 0]
-
         self.n_components_iter = len(self.weights_iter)
-
-    def _prune_exemplar(self):
-
-        n_samples, n_features = self.X_iter.shape
-
-        distances = np.zeros((n_samples, self.n_components_iter))
-
-        resp = np.ones((n_samples, self.n_components_iter)) / self.n_components_iter
-
-        self.covariances_iter += np.ones(self.covariances_iter.shape) * 1e-6
-        expanded_covariance_iter = _expand_covariance_matrix(self.covariances_iter, self.covariance_type, n_features)
-        for j in range(self.n_components_iter):
-            distances[:, j, np.newaxis] = distance.cdist(self.X_iter, self.means_iter[j, :][np.newaxis],
-                                                         metric='mahalanobis', VI=expanded_covariance_iter[j, :, :])
-
-        covariances_logdet_penalty = np.array(
-            [np.log(np.linalg.det(expanded_covariance_iter[i])) for i in range(self.n_components_iter)]) / n_samples
-
-        overlap_max = self.compute_overlap(n_features, expanded_covariance_iter)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-
-            theta = self.compute_theta(distances, covariances_logdet_penalty, overlap_max)
-            if theta is None:
-                return True
-
-        Ob = distances + covariances_logdet_penalty + (theta * overlap_max)
-
-        s_min = Ob.argmin(1)
-
-        resps = np.zeros((n_samples, self.n_components_iter))
-
-        resps[range(resps.shape[0]), s_min] = 1
-
-        self.return_refined(resps)
-        return False
 
     def _update_mixture(self):
         self._add_mixture()
@@ -526,7 +527,7 @@ class REM:
         if self.criteria == "icl" or self.criteria == "all":
             self.icl_mixture = self.mixtures[self.icls_.queue[0][1]]
 
-    def plot_exemplars(self):
+    def exemplars_plot(self):
         self._density, self._distance = _estimate_density_distances(self.data, self.bandwidth)
         _create_decision_plots(self._density, self._distance)
 
@@ -722,6 +723,8 @@ class REM:
             ax.scatter(group.x, group.y, s=1.5)
 
     def criterion_plot(self):
+        if not self.fitted:
+            raise Exception("model yet to be fitted")
         plt.figure(figsize=(15, 6))
         if self.criteria == "aic" or self.criteria == "all":
             _plot_criterion_score(self.aics_, self.mixtures, "-ro", "AIC")
