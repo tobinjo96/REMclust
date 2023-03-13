@@ -217,7 +217,6 @@ def _get_intervals(n_samples, ltidx, gtidx, ranges):
     return [item for sublist in union_intervals for item in sublist]
 
 
-
 def _print_mixing_proportions(weights):
     print("Mixing proportions:")
     format_row = "{:>22}" * (len(weights))
@@ -236,8 +235,8 @@ def _print_means(means):
     print()
 
 
-def _print_covariances(covariances, covariance_type, n_features):
-    expanded_covariances = _expand_covariance_matrix(covariances, covariance_type, n_features)
+def _print_covariances(covariances, covariance_type, n_features, n_components):
+    expanded_covariances = _expand_covariance_matrix(covariances, covariance_type, n_features, n_components)
     print("Variances:")
     format_row = "{:>22}" * (len(expanded_covariances[0][0]) + 1)
     for i, j in enumerate(expanded_covariances):
@@ -251,18 +250,20 @@ def _print_covariances(covariances, covariance_type, n_features):
     print()
 
 
-def _print_parameter_info(mixture):
+def _print_parameter_info(mixture, n_components):
     _print_mixing_proportions(mixture.weights_)
     _print_means(mixture.means_)
     _, n_features = mixture.means_.shape
-    _print_covariances(mixture.covariances_, mixture.covariance_type, n_features)
+    _print_covariances(mixture.covariances_, mixture.covariance_type, n_features, n_components)
 
 
-def _expand_covariance_matrix(covariances, covariance_type, n_features):
+def _expand_covariance_matrix(covariances, covariance_type, n_features, n_components):
     if covariance_type == 'spherical':
         return np.array([np.diag(np.ones(n_features) * i) for i in covariances])
     elif covariance_type == 'diag':
         return np.array([np.diag(i) for i in covariances])
+    elif covariance_type == 'tied':
+        return np.array([covariances] * n_components)
     else:
         return covariances
 
@@ -398,7 +399,7 @@ class REM:
         s_min = Ob.argmin(1)
         resps = np.zeros((n_samples, self.n_components_iter))
         resps[range(resps.shape[0]), s_min] = 1
-        self.return_refined(resps)
+        self._return_refined(resps)
         return False
 
     def _get_pruning_parameters(self):
@@ -411,7 +412,8 @@ class REM:
 
     def _alter_covariances(self, n_features, n_samples):
         self.covariances_iter += np.ones(self.covariances_iter.shape) * 1e-6
-        expanded_covariance_iter = _expand_covariance_matrix(self.covariances_iter, self.covariance_type, n_features)
+        expanded_covariance_iter = _expand_covariance_matrix(self.covariances_iter, self.covariance_type, n_features,
+                                                             self.n_components_iter)
         covariances_logdet_penalty = np.array(
             [np.log(np.linalg.det(expanded_covariance_iter[i])) for i in range(self.n_components_iter)]) / n_samples
         return covariances_logdet_penalty, expanded_covariance_iter
@@ -479,7 +481,7 @@ class REM:
         theta = thetas[~np.isnan(thetas)].min()
         return theta * 1.0001
 
-    def return_refined(self, resps):
+    def _return_refined(self, resps):
         self._update_weights(resps)
         self._add_exemplar_to_data()
         self._remove_pruned_mean()
@@ -558,27 +560,27 @@ class REM:
         print("{:<25} {:<5} {:<15}".format(mixture.score(self.data), np.shape(self.data)[0], queue.queue[0][0]))
         print()
 
-    def print_summary(self, score_type, queue, mixture, parameters, classification, scores):
+    def _print_summary(self, score_type, queue, mixture, parameters, classification, scores):
         if scores:
             self._print_score_table(score_type, queue)
         self._print_top_mixture_info(mixture, score_type, queue)
         if classification:
             self._print_classification(mixture)
         if parameters:
-            _print_parameter_info(mixture)
+            _print_parameter_info(mixture, mixture.n_components)
 
     def summary(self, parameters=False, classification=False, criterion_scores=False):
         if not self.fitted:
             raise Exception("Model yet to be fitted")
         if self.criteria == "aic" or self.criteria == "all":
-            self.print_summary("aic", self.aics_, self.aic_mixture, parameters=parameters,
-                               classification=classification, scores=criterion_scores)
+            self._print_summary("aic", self.aics_, self.aic_mixture, parameters=parameters,
+                                classification=classification, scores=criterion_scores)
         if self.criteria == "bic" or self.criteria == "all":
-            self.print_summary("bic", self.bics_, self.bic_mixture, parameters=parameters,
-                               classification=classification, scores=criterion_scores)
+            self._print_summary("bic", self.bics_, self.bic_mixture, parameters=parameters,
+                                classification=classification, scores=criterion_scores)
         if self.criteria == "icl" or self.criteria == "all":
-            self.print_summary("icl", self.icls_, self.icl_mixture, parameters=parameters,
-                               classification=classification, scores=criterion_scores)
+            self._print_summary("icl", self.icls_, self.icl_mixture, parameters=parameters,
+                                classification=classification, scores=criterion_scores)
 
     def _get_selected_mixture(self, mixture_selection):
         if self.criteria == "aic" or (self.criteria == "all" and str.lower(mixture_selection) == "aic"):
@@ -664,7 +666,8 @@ class REM:
             return
         labels = mixture.predict(self.data)
         fig, axs = plt.subplots(len(dimensions), len(dimensions), figsize=(15, 8))
-        expanded_covariances = _expand_covariance_matrix(mixture.covariances_, self.covariance_type, n_features)
+        expanded_covariances = _expand_covariance_matrix(mixture.covariances_, self.covariance_type, n_features,
+                                                         mixture.n_components)
         for axis_i, i in enumerate(dimensions):
             for axis_j, j in enumerate(dimensions):
                 if i != j:
@@ -685,7 +688,8 @@ class REM:
         labels = mixture.predict(self.data)
         fig, ax = plt.subplots()
         plotting_function(dimensions[0], dimensions[1], ax, labels, mixture)
-        expanded_covariances = _expand_covariance_matrix(mixture.covariances_, self.covariance_type, n_features)
+        expanded_covariances = _expand_covariance_matrix(mixture.covariances_, self.covariance_type, n_features,
+                                                         mixture.n_components)
         for i in range(mixture.n_components):
             _draw_ellipse(np.array([[expanded_covariances[i][dimensions[0]][dimensions[0]],
                                      expanded_covariances[i][dimensions[0]][dimensions[1]]],

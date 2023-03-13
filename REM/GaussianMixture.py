@@ -200,11 +200,13 @@ def _estimate_gaussian_covariances_tied(resp, X, nk, means, reg_covar):
     covariance : array, shape (n_features, n_features)
         The tied covariance matrix of the components.
     """
-    avg_X2 = np.dot(X.T, X)
-    avg_means2 = np.dot(nk * means.T, means)
-    covariance = avg_X2 - avg_means2
-    covariance /= nk.sum()
-    covariance.flat[:: len(covariance) + 1] += reg_covar
+    n_samples, n_features = X.shape
+    n_components, _ = means.shape
+    covariance = np.zeros((n_features, n_features))
+    for i in range(n_samples):
+        for j in range(n_components):
+            covariance += (resp[i, j] * (X[i, :] - means[j, :])[:, np.newaxis].dot(
+                (X[i, :] - means[j, :])[np.newaxis, :]))/resp[i, j]
     return covariance
 
 
