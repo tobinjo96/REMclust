@@ -32,96 +32,103 @@ def density_broad_search_star(a_b):
         raise Exception(e)
 
 
-def _estimate_density_distances(X, bandwidth):
-    n_samples, n_features = X.shape
+def _find_density_spherical_bandwidth(X, n_samples, n_features):
+    center = X.sum(0) / n_samples
+    X_centered = X - center
+    covariance_data = np.einsum('ij,ki->jk', X_centered, X_centered.T) / (n_samples - 1)
+    bandwidth = 1 / (100 * n_features) * np.trace(covariance_data)
+    kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(X)
+    return kde.score_samples(X)
 
-    if bandwidth == "spherical":
 
-        center = X.sum(0) / n_samples
+def _find_density_diagonal_bandwidth(X, n_features):
+    bandwidths = np.array([0.01 * np.std(X[:, i]) for i in range(n_features)])
+    var_type = 'c' * n_features
+    dens_u = sm.nonparametric.KDEMultivariate(data=X, var_type=var_type, bw=bandwidths)
+    return dens_u.pdf(X)
 
-        X_centered = X - center
 
-        covariance_data = np.einsum('ij,ki->jk', X_centered, X_centered.T) / (n_samples - 1)
+def _find_density_normal_reference_bandwidth(X, n_features):
+    var_type = 'c' * n_features
+    dens_u = sm.nonparametric.KDEMultivariate(data=X, var_type=var_type, bw='normal_reference')
+    return dens_u.pdf(X)
 
-        bandwidth = 1 / (100 * n_features) * np.trace(covariance_data)
-        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(X)
 
-        density = kde.score_samples(X)
-
-    elif bandwidth == "diagonal":
-        bandwidths = np.array([0.01 * np.std(X[:, i]) for i in range(n_features)])
-
-        var_type = 'c' * n_features
-
-        dens_u = sm.nonparametric.KDEMultivariate(data=X, var_type=var_type, bw=bandwidths)
-
-        density = dens_u.pdf(X)
-
-    elif bandwidth == "normal_reference":
-        var_type = 'c' * n_features
-
-        dens_u = sm.nonparametric.KDEMultivariate(data=X, var_type=var_type, bw='normal_reference')
-
-        density = dens_u.pdf(X)
-
-    elif isinstance(bandwidth, int):
-        kdt = KDTree(X, metric='euclidean')
-
-        distances, neighbors = kdt.query(X, int(bandwidth))
-
-        density = 1 / distances[:, int(bandwidth) - 1]
-
-    elif isinstance(bandwidth, float):
-        kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(X)
-
-        density = kde.score_samples(X)
-
+def _find_density_int_bandwidth(X, bandwidth):
     kdt = KDTree(X, metric='euclidean')
+    distances, neighbors = kdt.query(X, int(bandwidth))
+    return 1 / distances[:, int(bandwidth) - 1]
 
+
+def _find_density_float_bandwidth(X, bandwidth):
+    kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(X)
+    return kde.score_samples(X)
+
+
+def _find_density(X, bandwidth, n_samples, n_features):
+    if bandwidth == "spherical":
+        return _find_density_spherical_bandwidth(X, n_samples, n_features)
+    elif bandwidth == "diagonal":
+        return _find_density_diagonal_bandwidth(X, n_features)
+    elif bandwidth == "normal_reference":
+        return _find_density_normal_reference_bandwidth(X, n_features)
+    elif isinstance(bandwidth, int):
+        return _find_density_int_bandwidth(X, bandwidth)
+    elif isinstance(bandwidth, float):
+        return _find_density_float_bandwidth(X, bandwidth)
+
+
+def _initialise_distance(X, n_samples, density):
+    kdt = KDTree(X, metric='euclidean')
     distances, neighbors = kdt.query(X, np.floor(np.sqrt(n_samples)).astype(int))
-
     best_distance = np.empty((X.shape[0]))
-
     radius_diff = density[:, np.newaxis] - density[neighbors]
-
     rows, cols = np.where(radius_diff < 0)
-
     rows, unidx = np.unique(rows, return_index=True)
-
     cols = cols[unidx]
-
     best_distance[rows] = distances[rows, cols]
+    return best_distance, rows
 
-    search_idx = list(np.setdiff1d(list(range(X.shape[0])), rows))
 
+def _find_gt_radius(density, search_idx):
     search_density = density[search_idx]
+    return density > search_density[:, np.newaxis]
 
-    GT_radius = density > search_density[:, np.newaxis]
 
+def _radius_sum_is_zero(X, best_distance, search_idx, GT_radius):
     if any(np.sum(GT_radius, axis=1) == 0):
         max_i = [i for i in range(GT_radius.shape[0]) if np.sum(GT_radius[i, :]) == 0]
-
         if len(max_i) > 1:
             for max_j in max_i[1:len(max_i)]:
                 GT_radius[max_j, search_idx[max_i[0]]] = True
-
         max_i = max_i[0]
-
         best_distance[search_idx[max_i]] = np.sqrt(((X - X[search_idx[max_i], :]) ** 2).sum(1)).max()
-
         GT_radius = np.delete(GT_radius, max_i, 0)
-
         del search_idx[max_i]
+    return best_distance, search_idx, GT_radius
 
+
+def _calculate_distance(X, search_idx, best_distance, GT_radius):
     GT_distances = ([X[search_idx[i], np.newaxis], X[GT_radius[i, :], :]] for i in range(len(search_idx)))
-
     distances_bb = list(map(density_broad_search_star, list(GT_distances)))
-
     argmin_distance = [np.argmin(l) for l in distances_bb]
-
     for i in range(GT_radius.shape[0]):
         best_distance[search_idx[i]] = distances_bb[i][argmin_distance[i]]
+    return best_distance
 
+
+def _find_distance(X, n_samples, density):
+    best_distance, rows = _initialise_distance(X, n_samples, density)
+    search_idx = list(np.setdiff1d(list(range(X.shape[0])), rows))
+    GT_radius = _find_gt_radius(density, search_idx)
+    best_distance, search_idx, GT_radius = _radius_sum_is_zero(X, best_distance, search_idx, GT_radius)
+    return _calculate_distance(X, search_idx, best_distance, GT_radius)
+
+
+def _estimate_density_distances(X, bandwidth):
+    n_samples, n_features = X.shape
+    density = _find_density(X, bandwidth, n_samples, n_features)
+    best_distance = _find_distance(X, n_samples, density)
     return density, best_distance
 
 
@@ -173,9 +180,7 @@ def _select_exemplars_fromK(X, density, distance, max_components):
 
 def _initialize_covariances(X, means, covariance_type):
     n_samples, n_features = X.shape
-
     n_components = means.shape[0]
-
     center = X.sum(0) / n_samples
 
     X_centered = X - center
@@ -310,6 +315,7 @@ class REM:
         self._density_threshold = None
         self._max_components = None
         self._distance_threshold = None
+        self._check_parameters()
 
     def _check_parameters(self):
         """Check the Gaussian mixture parameters are well defined."""
