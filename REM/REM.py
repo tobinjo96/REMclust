@@ -164,7 +164,7 @@ def _select_exemplars_from_thresholds(X, density, distance, density_threshold, d
     remainder_idx = np.where(~(density_inlier * distance_inlier))[0]
     means = X[means_idx, :]
     X_iter = X[remainder_idx, :]
-    print("%s means selected." % means.shape[0])
+    print("%s modes selected." % means.shape[0])
     return X_iter, means
 
 
@@ -174,7 +174,7 @@ def _select_exemplars_fromK(X, density, distance, max_components):
     remainder_idx = np.argsort(- density * distance)[range(max_components, n_samples)]
     means = X[means_idx, :]
     X_iter = X[remainder_idx, :]
-    print("%s means selected." % means.shape[0])
+    print("%s modes selected." % means.shape[0])
     return X_iter, means
 
 
@@ -535,7 +535,7 @@ class REM:
         if self.criteria == "icl" or self.criteria == "all":
             self.icl_mixture = self.mixtures[self.icls_.queue[0][1]]
 
-    def exemplars_plot(self):
+    def mode_decision_plot(self):
         self._density, self._distance = _estimate_density_distances(self.data, self.bandwidth)
         _create_decision_plots(self._density, self._distance)
 
@@ -613,7 +613,7 @@ class REM:
         else:
             raise Exception("Model yet to be fitted")
 
-    def density_plot(self, dimensions=None, axis_labels=None):
+    def kde_contour_plot(self, dimensions=None, axis_labels=None):
         if dimensions is not None and not isinstance(dimensions, list):
             raise Exception("\"dimensions\" must be a list of integers.")
         if dimensions is None:
