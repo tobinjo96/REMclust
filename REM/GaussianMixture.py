@@ -205,9 +205,8 @@ def _estimate_gaussian_covariances_tied(resp, X, nk, means, reg_covar):
     covariance = np.zeros((n_features, n_features))
     for i in range(n_samples):
         for j in range(n_components):
-            covariance += (resp[i, j] * (X[i, :] - means[j, :])[:, np.newaxis].dot(
-                (X[i, :] - means[j, :])[np.newaxis, :]))/resp[i, j]
-    return covariance
+            covariance += (resp[i, j] * (X[i, :] - means[j, :])[:, np.newaxis].dot((X[i, :] - means[j, :])[np.newaxis,:]))/n_samples
+    return covariance + reg_covar
 
 
 def _estimate_gaussian_covariances_diag(resp, X, nk, means, reg_covar):

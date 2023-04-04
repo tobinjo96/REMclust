@@ -81,7 +81,7 @@ class Overlap:
                 m2 = ga.dot(val)
                 self.di[j][i] = m2
 
-                self.const1[i][j] = math.log(mp.fmul(self.pi[j], self.pi[j]) / mp.fmul(self.pi[i], self.pi[i]) * dets[i] / dets[j])
+                self.const1[i][j] = mp.log(mp.fmul(self.pi[j], self.pi[j]) / mp.fmul(self.pi[i], self.pi[i]) * dets[i] / dets[j])
                 self.const1[j][i] = -self.const1[i][j]
 
 

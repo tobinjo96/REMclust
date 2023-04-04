@@ -25,7 +25,7 @@ from . import GaussianMixture
 
 ###############################################################################
 # Input parameter checkers used by the REM class
-def density_broad_search_star(a_b):
+def _density_broad_search_star(a_b):
     try:
         return euclidean_distances(a_b[1], a_b[0])
     except Exception as e:
@@ -110,7 +110,7 @@ def _radius_sum_is_zero(X, best_distance, search_idx, GT_radius):
 
 def _calculate_distance(X, search_idx, best_distance, GT_radius):
     GT_distances = ([X[search_idx[i], np.newaxis], X[GT_radius[i, :], :]] for i in range(len(search_idx)))
-    distances_bb = list(map(density_broad_search_star, list(GT_distances)))
+    distances_bb = list(map(_density_broad_search_star, list(GT_distances)))
     argmin_distance = [np.argmin(l) for l in distances_bb]
     for i in range(GT_radius.shape[0]):
         best_distance[search_idx[i]] = distances_bb[i][argmin_distance[i]]
