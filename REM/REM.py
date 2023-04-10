@@ -759,13 +759,22 @@ class REM:
         self._max_components = max_components
         self._density_threshold = density_threshold
         self._distance_threshold = distance_threshold
-        self.fit_predict()
+        self._fit_predict()
         self.fitted = True
         self.t2 = time.perf_counter()
 
         return self
 
-    def fit_predict(self):
+    def _fit_predict(self):
         self._initialize_parameters()
         self._iterative_REM_procedure()
         self._set_optimal_mixture()
+
+    def get_labels(self, mixture_selection=''):
+        return self._get_selected_mixture(mixture_selection).predict(self.data)
+
+    def predict(self, new_data, mixture_selection=''):
+        return self._get_selected_mixture(mixture_selection).predict(new_data)
+
+    def predict_probabilities(self, mixture_selection=''):
+        return self._get_selected_mixture(mixture_selection).predict_proba(self.data)
