@@ -8,7 +8,7 @@ setup(
   author='Joshua Tobin, Mimi Zhang, Chin Pang Ho, Ralph Swords',                   # Type in your name
   author_email='tobinjo@tcd.ie',      # Type in your E-Mail
   url='https://github.com/r-swords/REMclust',
-  download_url='https://github.com/user/reponame/archive/v_01.tar.gz',
+  download_url='https://github.com/r-swords/REMclust/archive/refs/tags/v_01.tar.gz',
   keywords=['REM', 'Reinforced EM', 'Clustering', 'Density-Based Clustering', 'Parametric Density-Based Clustering', 'Gaussian Mixture Models'],   # Keywords that define your package best
   install_requires=[
     'numpy',
