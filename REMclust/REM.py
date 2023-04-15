@@ -1,8 +1,6 @@
 """Gaussian Mixture Model."""
 
 # Modified code from Scikit-Learn
-import math
-import time
 import numpy as np
 from matplotlib import transforms
 from scipy.spatial.distance import mahalanobis
@@ -302,8 +300,6 @@ class REM:
     ):
         self.data = data
         self.fitted = False
-        self.t1 = None
-        self.t2 = None
         self.covariance_type = covariance_type
         self.criteria = criteria
         self.bandwidth = bandwidth
@@ -748,7 +744,6 @@ class REM:
         plt.show()
 
     def fit(self, max_components=5, density_threshold=None, distance_threshold=None):
-        self.t1 = time.perf_counter()
         self.weights_iter = None
         self.covariances_iter = None
         self.mixtures = []
@@ -761,7 +756,6 @@ class REM:
         self._distance_threshold = distance_threshold
         self._fit_predict()
         self.fitted = True
-        self.t2 = time.perf_counter()
 
         return self
 
