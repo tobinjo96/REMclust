@@ -2,18 +2,18 @@
 ---
 ### Introduction
 
-REMclust is a python package for model-based clustering based on finite normal mixture modelling. It uses a peak finding criterion to find modes within the data set. An initial mode set is taken to be the means in Gaussian components.
+REMclust is a Python package for model-based clustering based on Gaussian mixture models. It uses a peak finding criterion to find modes within the data set. An initial mode set is taken to be the means in Gaussian components.
 
-Once the initial mode set has been selected, an iterative procedure comprising two blocks are triggered. A mixture is produced for each iteration.
+Once the initial mode set has been selected, an iterative procedure comprising two blocks is triggered. A mixture is produced for each iteration.
 1. An EM block to fit the covariances and mixing proportions of the components
-2. A pruning block to remove one of the components, as part of an efficient model selection strategy.
+2. A pruning block to remove one of the components as part of an efficient model selection strategy.
 
-Additional functionalities are available for displaying and visualizing fitted models along with clustering results.
+Additional functionalities are available for displaying and visualising fitted models and clustering results.
 
 ---
 ### Data
 
-The data set used in this vignette is the [Palmer Archipelago (Antarctica) Penguin Data](https://github.com/allisonhorst/palmerpenguins). The following methods are used simply to load the dataset. In this particular data set, the features are measured across different scales, for example, culmen depth ranges from 13.1 to 21.5, while body mass ranges from 2700 to 6300. This difference in scale can negatively impact the clustering accuracy, so standardisation was performed. Standardisation ensures that all features are measured in comparable scales, and is process that is recommended when that data set that is being clustered has features that vary widely in scale.
+The data set used in this vignette is the [Palmer Archipelago (Antarctica) Penguin Data](https://github.com/allisonhorst/palmerpenguins). In this particular data set, the features are measured across different scales, for example, culmen depth ranges from 13.1 to 21.5, while body mass ranges from 2700 to 6300. This difference in scale can negatively impact the clustering accuracy, so standardisation was performed. Standardisation ensures that all features are measured in comparable scales and is the process that is recommended when the data set that is being clustered has features that vary widely in scale. The following methods are used to load the dataset.
 
 
 ```python
@@ -44,34 +44,32 @@ REM(data, covariance_type='full', criteria='all', bandwidth='diagonal', tol=1e-3
 ```
 - **data (array-like of shape (n_samples, n_features))**: The data the model is being fitted to.
 - **covariance_type {'full', 'tied', 'diag', 'spherical'}**: A string describing the type of covariance parameters to use. ‘full’: each component has its own general covariance matrix. ‘tied’: all components share the same general covariance matrix. ‘diag’: each component has its own diagonal covariance matrix. ‘spherical’: each component has its own single variance.
-- **criteria {'all', 'aic', 'bic', 'icl'}**: A string defining the criterion score used in model selection. At the end of each iteration of REM, a mixture is produced. The mixture minimises this score will be taken as the optimal clustering.
+- **criteria {'all', 'aic', 'bic', 'icl'}**: A string defining the criterion score used in model selection. At the end of each iteration of REM, a mixture is produced. The mixture that minimises this score will be taken as the optimal clustering.
 - **bandwidth ({'diagonal', 'spherical', 'normal_reference'}, int, float)**: Either a string, integer, or floating point number that defines the bandwidth used when finding the modes.
 - **tol (float)**: The convergence threshold. EM iterations will stop when the lower bound average gain is below this threshold.
-- **reg_covar (float)**: Non-negative regularization added to the diagonal of covariance. Allows to assure that the covariance matrices are all positive.
+- **reg_covar (float)**: Non-negative regularisation added to the diagonal of covariance. Allows to ensure that the covariance matrices are all positive.
 - **max_iter (int)**: The number of EM iterations to perform.
 
 
 ```python
 bndwk = int(np.floor(np.min((30, np.log(n_samples)))))
-cluster = REM.REM(data=x, covariance_type="full", criteria="icl",bandwidth=bndwk, tol=1e-4)
+cluster = REM(data=x, covariance_type="full", criteria="icl",bandwidth=bndwk, tol=1e-4)
 ```
 
 ### Mode Selection
 
-The initial mode set must be selected by the user. To do this, they must select a *distance_threshold* and *density_threshold*. To aid in this, the method
+The user must select the initial mode set. To do this, they must select a *distance_threshold* and *density_threshold*. To aid in this, the method
 ```python
 REM.mode_decision_plot()
 ```
-is provided. This draws two plots, one is a plot of the distance between a point to its nearest neighbor with a higher density against the points' density. This plot will allow the user to select the appropriate thresholds. The ideal modes have both a high distance and density. The second plot shows the product of the distance and the density for each point, allowing the user to clearly the likely number of modes.
+is provided. This method draws two plots. One is a plot of the distance between a point to its nearest neighbour with a higher density against the points' density. This plot will allow the user to select the appropriate thresholds. The ideal modes have both a high distance and density. The second plot shows the product of the distance and the density for each point, allowing the user to determine the likely number of modes easily.
 
 
 ```python
 cluster.mode_decision_plot()
 ```
 
-
-    
-![png](REMclust_vignette_files/REMclust_vignette_6_0.png)
+![](https://github.com/r-swords/REMclust/raw/main/REMclust_vignette_files/REMclust_vignette_6_0.png)
     
 
 
@@ -79,10 +77,10 @@ REMclust also provides the method:
 ```python
 REM.kde_contour_plot(dimensions=None, axis_labels=None)
 ```
-- **dimensions (list(int))**: A list of integers that defines the features that will be plotted. If left as None all features will be plotted.
+- **dimensions (list(int))**: A list of integers that defines the features that will be plotted. If left as None, all features will be plotted.
 - **axis_labels (list(str))**: A list of strings that define the labels for the axes.
 
-This provides a contour plot of the estimated KDE densities.
+This method provides a contour plot of the estimated KDE densities.
 
 
 ```python
@@ -91,7 +89,7 @@ cluster.kde_contour_plot(dimensions=[1, 2, 4, 5], axis_labels=[labels[1], labels
 
 
     
-![png](REMclust_vignette_files/REMclust_vignette_8_0.png)
+![](https://github.com/r-swords/REMclust/raw/main/REMclust_vignette_files/REMclust_vignette_8_0.png)
     
 
 
@@ -102,12 +100,12 @@ To perform clustering, the following method is run:
 fit(max_components=5, density_threshold=None, distance_threshold=None)
 ```
 - **max_components (int)**: An integer that defines the initial size of the mode set. The modes with the highest $density \times distance$ will fill the set.
-- **density_threshold (float)**: A float that defines the threshold for the mode's density. A mode must have a higher density to be included in the initial mode set.
-- **distance_threshold (float)**: A float that defines the threshold for the mode's distance. A mode must have a higher distance to be included in the initial mode set.
+- **density_threshold (float)**: A float defining the mode's density threshold. A mode must have a higher density to be included in the initial mode set.
+- **distance_threshold (float)**: A float defining the mode's distance threshold. A mode must have a higher distance to be included in the initial mode set.
 
 **Note:** There are two possible ways to define the mode set:
 1. Setting the max components value k, in which the k modes with the highest $density \times distance$ will be included in the initial mode set.
-2. Setting the two thresholds, in which the modes that exceed both thresholds will be included in the initial mode set.
+2. Setting the two thresholds will include the modes exceeding both in the initial mode set.
 
 Should the user set the max components and the thresholds, the mode set created by the thresholds will be preferred.
 
@@ -121,12 +119,12 @@ cluster.fit(density_threshold = 1.6, distance_threshold = 3)
 
 ### Visualisation
 
-REMclust provides visualisation tools that allow the user to explore results of the clustering. The first of these is:
+REMclust provides visualisation tools that allow the user to explore the clustering results. The first of these is:
 ```python
 REM.classification_plot(mixture_selection='', dimensions=None, axis_labels=None)
 ```
-A plot of the classification of the data that the clustering was performed on.
-- **mixture_selection {'', 'aic', bic', 'icl'}** This defines whether the user would like plot the results from the model selected by AIC, BIC, or ICL. If the initial criterion was set to 'all', this is required, otherwise it should not be set.
+A plot of the classification of the data on which the clustering was performed.
+- **mixture_selection {'', 'aic', bic', 'icl'}** This defines whether the user would like to plot the results from the model selected by AIC, BIC, or ICL. This is required if the initial criterion was set to 'all'. Otherwise, it should not be set.
 - **dimensions (list(int))**: A list of integers that defines the features that will be plotted. If left as None all features will be plotted.
 - **axis_labels (list(str))**: A list of strings that define the labels for the axes.
 
@@ -137,7 +135,7 @@ cluster.classification_plot(dimensions=[0,1,2], axis_labels=[labels[0], labels[1
 
 
     
-![png](REMclust_vignette_files/REMclust_vignette_12_0.png)
+![](https://github.com/r-swords/REMclust/raw/main/REMclust_vignette_files/REMclust_vignette_12_0.png)
     
 
 
@@ -145,8 +143,8 @@ Another visualisation method provided by REMclust is:
 ```python
 REM.uncertainty_plot(mixture_selection='', dimensions=None, axis_labels=None)
 ```
-A plot of the uncertainty of the data that the clustering was performed on. Uncertainty measured as inverse of the difference between probability that a point belongs to the cluster it was assigned and the probability that it belongs to the next most likely cluster. The uncertainty score for a point is represented by its size in the scatter plot
-- **mixture_selection {'', 'aic', bic', 'icl'}** This defines whether the user would like plot the results from the model selected by AIC, BIC, or ICL. If the initial criterion was set to 'all', this is required, otherwise it should not be set.
+A plot of the uncertainty of the data that the clustering was performed on. Uncertainty is measured as the inverse of the difference between the probability that a point belongs to the assigned cluster and the probability that it belongs to the next most likely cluster. The uncertainty score for a point is represented by its size in the scatter plot
+- **mixture_selection {'', 'aic', bic', 'icl'}** This defines whether the user would like to plot the results from the model selected by AIC, BIC, or ICL. This is required if the initial criterion was set to 'all'. Otherwise, it should not be set.
 - **dimensions (list(int))**: A list of integers that defines the features that will be plotted. If left as None all features will be plotted.
 - **axis_labels (list(str))**: A list of strings that define the labels for the axes.
 
@@ -157,7 +155,7 @@ cluster.uncertainty_plot()
 
 
     
-![png](REMclust_vignette_files/REMclust_vignette_14_0.png)
+![](https://github.com/r-swords/REMclust/raw/main/REMclust_vignette_files/REMclust_vignette_14_0.png)
     
 
 
@@ -174,18 +172,18 @@ cluster.criterion_plot()
 
 
     
-![png](REMclust_vignette_files/REMclust_vignette_16_0.png)
+![](https://raw.githubusercontent.com/r-swords/REMclust/main/REMclust_vignette_files/REMclust_vignette_16_0.png)
     
 
 
 ### Summary
-As well as visualisations, REMclust also provides a method that prints text based summaries of the clustering results.
+As well as visualisations, REMclust also provides a method that prints text-based summaries of the clustering results.
 ```python
 REM.summary(parameters=False, classification=False, criterion_scores=False)
 ```
 - **parameters (boolean)**: If TRUE, the parameters of mixture components are printed.
 - **classification (boolean)**: If TRUE, a table of classifications/clustering of observations is printed.
-- **criterion_scores (boolean)**: If TRUE, the criterion scores of all the models tested are printed.
+- **criterion_scores (boolean)**: If TRUE, all the tested models' criterion scores are printed.
 
 
 ```python
