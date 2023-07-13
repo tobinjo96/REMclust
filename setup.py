@@ -10,7 +10,7 @@ setup(
   description='This is the official implementation of Reinforced EM, a parametric density-based clustering method',
   long_description=long_description,
   long_description_content_type='text/markdown',
-  author='Joshua Tobin, Mimi Zhang, Chin Pang Ho, Ralph Swords',                   # Type in your name
+  author='Joshua Tobin, Ralph Swords, Mimi Zhang',                   # Type in your name
   author_email='tobinjo@tcd.ie',      # Type in your E-Mail
   url='https://github.com/r-swords/REMclust',
   download_url='https://github.com/r-swords/REMclust/archive/refs/tags/v_1.tar.gz',
